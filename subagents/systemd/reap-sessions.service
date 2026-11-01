@@ -1,0 +1,8 @@
+[Unit]
+Description=Close the Claude and Codex sessions of finished T3 threads
+
+[Service]
+Type=oneshot
+# PATH must reach node 22+; with nvm add its bin dir, e.g. %h/.nvm/versions/node/<version>/bin.
+Environment="PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin"
+ExecStart=/usr/bin/env node %h/.agents/skills/subagents/code/reap-sessions.mjs --idle-min 5
