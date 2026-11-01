@@ -1,0 +1,193 @@
+{
+  "version": 1,
+  "skills": [
+    {
+      "name": "better-ui",
+      "description": "Exact values for UI polish: concentric radii, shadows vs borders, icon strokes, press scale, enter/exit and theme-switch motion.",
+      "tags": [
+        "ui",
+        "motion",
+        "css",
+        "tailwind",
+        "react",
+        "web",
+        "design"
+      ],
+      "source": {
+        "repo": "https://github.com/jakubkrehel/skills",
+        "path": "skills/better-ui",
+        "commit": "592aedc44d7d5b3e29740984252902f3e5402a1c"
+      },
+      "license": "MIT",
+      "kind": "markdown",
+      "status": "available"
+    },
+    {
+      "name": "animate",
+      "description": "Build one animation the right way: should it animate, purpose, tool, properties, curve/duration or spring, interruption, reduced motion.",
+      "tags": [
+        "motion",
+        "ui",
+        "css",
+        "react",
+        "web"
+      ],
+      "source": {
+        "repo": "https://github.com/emilkowalski/skills",
+        "path": "skills/animate",
+        "commit": "a81dbca07f2217b7103e510c0f13f8d5b017afc9"
+      },
+      "license": "MIT",
+      "kind": "markdown",
+      "status": "available"
+    },
+    {
+      "name": "react-best-practices",
+      "skill_name": "vercel-react-best-practices",
+      "description": "Vercel's React/Next.js performance rules (waterfalls, bundle size, server, re-renders), one file per rule plus a compiled AGENTS.md.",
+      "tags": [
+        "react",
+        "nextjs",
+        "web",
+        "performance"
+      ],
+      "source": {
+        "repo": "https://github.com/vercel-labs/agent-skills",
+        "path": "skills/react-best-practices",
+        "commit": "1a2c79d4e6c4a2283dc2c614b6538cbe1ed5ca62"
+      },
+      "license": "MIT",
+      "kind": "markdown",
+      "status": "available"
+    },
+    {
+      "name": "composition-patterns",
+      "skill_name": "vercel-composition-patterns",
+      "description": "Vercel's React composition rules: compound components, lifting state, explicit variants instead of boolean props, React 19 APIs.",
+      "tags": [
+        "react",
+        "web",
+        "architecture"
+      ],
+      "source": {
+        "repo": "https://github.com/vercel-labs/agent-skills",
+        "path": "skills/composition-patterns",
+        "commit": "1a2c79d4e6c4a2283dc2c614b6538cbe1ed5ca62"
+      },
+      "license": "MIT",
+      "kind": "markdown",
+      "status": "available"
+    },
+    {
+      "name": "react-view-transitions",
+      "skill_name": "vercel-react-view-transitions",
+      "description": "Vercel's guide to React's <ViewTransition> API: shared elements, Suspense reveals, list reorder, route transitions, Next.js setup.",
+      "tags": [
+        "react",
+        "nextjs",
+        "motion",
+        "web"
+      ],
+      "source": {
+        "repo": "https://github.com/vercel-labs/agent-skills",
+        "path": "skills/react-view-transitions",
+        "commit": "1a2c79d4e6c4a2283dc2c614b6538cbe1ed5ca62"
+      },
+      "license": "MIT",
+      "kind": "markdown",
+      "status": "available"
+    },
+    {
+      "name": "web-design-guidelines",
+      "description": "Vercel's UI review: fetches the current Web Interface Guidelines and reports findings as file:line.",
+      "tags": [
+        "ui",
+        "web",
+        "design",
+        "accessibility",
+        "review"
+      ],
+      "source": {
+        "repo": "https://github.com/vercel-labs/agent-skills",
+        "path": "skills/web-design-guidelines",
+        "commit": "1a2c79d4e6c4a2283dc2c614b6538cbe1ed5ca62"
+      },
+      "license": "MIT",
+      "kind": "markdown",
+      "status": "available"
+    },
+    {
+      "name": "frontend-design",
+      "description": "Anthropic's frontend-design skill: commit to a bold, distinctive aesthetic direction and avoid generic AI-looking UI.",
+      "tags": [
+        "ui",
+        "design",
+        "web",
+        "landing"
+      ],
+      "source": {
+        "repo": "https://github.com/anthropics/skills",
+        "path": "skills/frontend-design",
+        "commit": null
+      },
+      "license": "Apache-2.0",
+      "kind": "markdown",
+      "status": "available"
+    },
+    {
+      "name": "design-taste-frontend",
+      "description": "Anti-template design rules for landing pages, portfolios and redesigns: infer a direction, use real design systems, audit first, strict pre-flight.",
+      "tags": [
+        "ui",
+        "design",
+        "web",
+        "landing",
+        "react"
+      ],
+      "source": {
+        "repo": "https://github.com/leonxlnx/taste-skill",
+        "path": null,
+        "commit": null
+      },
+      "license": "MIT",
+      "kind": "markdown",
+      "status": "available"
+    },
+    {
+      "name": "ui-ux-pro-max",
+      "description": "Large UI/UX design database (styles, palettes, font pairings, UX rules) queried through Python search scripts.",
+      "tags": [
+        "ui",
+        "design",
+        "web",
+        "mobile"
+      ],
+      "source": {
+        "repo": "https://github.com/nextlevelbuilder/ui-ux-pro-max-skill",
+        "path": null,
+        "commit": null
+      },
+      "license": "unknown",
+      "kind": "has-scripts",
+      "status": "known"
+    },
+    {
+      "name": "agentation",
+      "description": "Click-to-annotate dev toolbar for React apps plus a local MCP server that hands the notes to agents.",
+      "tags": [
+        "ui",
+        "react",
+        "web",
+        "review"
+      ],
+      "source": {
+        "repo": "https://github.com/benjitaylor/agentation",
+        "path": null,
+        "commit": "0e3236eb1a0f5577852ab7bb5121f5dd46d42f1d"
+      },
+      "license": "PolyForm-Shield-1.0.0",
+      "kind": "has-scripts",
+      "status": "known"
+    }
+  ]
+}

@@ -1,0 +1,8 @@
+[Unit]
+Description=Settle finished T3 worker threads (delegate_task children, re-opened t3-thread workers)
+
+[Service]
+Type=oneshot
+# PATH must reach node 22+; with nvm add its bin dir, e.g. %h/.nvm/versions/node/<version>/bin.
+Environment="PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin"
+ExecStart=/usr/bin/env node %h/.agents/skills/subagents/code/prune-workers.mjs --settle --min 0

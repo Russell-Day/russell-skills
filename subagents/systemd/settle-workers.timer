@@ -1,0 +1,9 @@
+[Unit]
+Description=Settle finished T3 worker threads every minute
+
+[Timer]
+OnCalendar=*:*:00
+AccuracySec=5s
+
+[Install]
+WantedBy=timers.target

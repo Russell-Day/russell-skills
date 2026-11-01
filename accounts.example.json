@@ -1,0 +1,28 @@
+{
+  "_doc": {
+    "setup": "Copy to accounts.local.json (git-ignored) and fill in this machine's accounts. Scripts read accounts.local.json, else this file. A leading ~/ means your home directory.",
+    "claude.configDir": "CLAUDE_CONFIG_DIR for headless Claude workers (run.sh).",
+    "claude.t3Instance": "T3 provider instance your Claude orchestrator threads use.",
+    "claude.t3WorkerInstance": "T3 instance for Claude workers (a profile with a smaller auto-compact window). Same as t3Instance if you have only one.",
+    "codex.default": "Codex account name used when ACCOUNT is unset.",
+    "codex.accounts[].name": "Name you pass as ACCOUNT=<name>.",
+    "codex.accounts[].home": "CODEX_HOME for that account (run.sh, and usage.mjs reads models_cache.json there).",
+    "codex.accounts[].t3Instance": "T3 provider instance id for that account (t3-thread.mjs, usage.mjs).",
+    "codex.accounts[].reserve": "ACCOUNT=auto uses reserve accounts only after every other account is low (a window at 90%+) or lacks the model.",
+    "jobRoots": "Optional extra job directories (a project's own copy of the subagents skill) that thread cleanup and parent lookup also scan, besides AGENT_JOBS_DIR.",
+    "messageBoard.feedback": "Optional: the command a message-board brief tells agents to use to report a board gap (the brief's last line). Empty leaves the line out."
+  },
+  "claude": {
+    "configDir": "~/.claude",
+    "t3Instance": "claudeAgent",
+    "t3WorkerInstance": "claudeAgent"
+  },
+  "codex": {
+    "default": "main",
+    "accounts": [
+      { "name": "main", "home": "~/.codex", "t3Instance": "codex", "reserve": false }
+    ]
+  },
+  "jobRoots": [],
+  "messageBoard": { "feedback": "" }
+}
