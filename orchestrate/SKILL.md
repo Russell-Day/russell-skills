@@ -266,7 +266,11 @@ finding ids.
 scarcest spend.
 - **3 review rounds per stage** (review + rechecks). Up to **5** only while a
   blocker with evidence stays open on security, permissions, auth, data loss
-  or state/concurrency.
+  or state/concurrency. Every recheck sent is a round, whatever prompted it.
+- **Device-bound stages** (a build only a real device or another machine can
+  test): the reviewer is not the test harness. Iterate builds on the device
+  until its log shows the fix working, then send one recheck for that build,
+  never one per attempt.
 - **Weigh every finding yourself.** Check its severity against the code, take
   the smallest fix, and push back with file:line or test evidence where it's
   wrong. Pushback is good; never agree just to end the loop.
