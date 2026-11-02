@@ -258,6 +258,15 @@ ATTACH=$(cat ~/.local/state/agent-jobs/<prefix><stage>-impl/thread_id) CONTINUE=
   JOB=<prefix><stage>-impl setsid nohup node $S/t3-thread.mjs <model> /tmp/<plan>/<stage>-fix.md > … &
 ```
 
+**A worker past 3 compactions gets no new round.** Check first
+(`node $S/t3-thread.mjs --compactions <worker thread>`; a project copy may have
+`--next-round`, which also writes the brief). At 3+, start a fresh worker
+(`<prefix><stage>-impl-r<N+1>`) told the old thread's id, its last report, that
+its edits are uncommitted in the tree, and PLAN, followed by its original brief
+and the findings; send the old one nothing. `CONTINUE=1` above already does this
+on its own. A stage whose first worker turn compacts 3+ times was too big: split
+what's left into a new stage.
+
 Then a targeted recheck on the **same reviewer thread** with the subagents
 `recheck-prompt.md` (`ATTACH=<review thread> CONTINUE=1`), naming only the open
 finding ids.
