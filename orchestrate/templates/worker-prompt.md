@@ -55,7 +55,8 @@ A test the reviewer can make pass by deleting the feature does not count.
 - Ask nothing of the user directly; if blocked, say so in the packet.
 
 ## Verify
-<exact commands: pytest paths, ruff, npm test, build>
+<exact commands: pytest paths, ruff, npm test, typecheck. A build check only into a scratch outDir
+(e.g. `--outDir /tmp/...`), never the project's live/served output: that would publish everyone's WIP>
 <Live-replay stage only (the plan's "Live replay" column names <snapshot>): done means a passing replay
 with your uncommitted change loaded, before any review. Project steps come from the project's own skill.
 Put the run thread id and the judged verdicts in your packet; without them the review is an automatic REVISE.>
