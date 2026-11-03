@@ -29,7 +29,7 @@ over **<the list>**. Model routing comes from the subagents skill
 - <job directory: ~/.local/state/<…>-jobs/<JOB>/>
 
 ## Reviewers
-- <model + effort per stage type, e.g. sol61 medium; sol61 high for the final all-commits review>
+- <model + effort per stage type, e.g. terra61 high per stage; terra61 high + sol61 high, blind, for the final all-commits review>
 - <extra adversarial probes specific to this list>
 - expectations check: the orchestrate review-addendum applies to every stage
 
