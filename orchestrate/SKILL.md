@@ -77,8 +77,8 @@ Group items into stages so that:
 - an item that needs another stage's output comes after it.
 
 Assign a model per stage from the subagents routing table (Opus for
-implementation and UI, sol61 medium as the
-reviewer; sol61 high only for the final all-commits review). Decide the order: quick wins first so the user sees movement, risky
+implementation and UI, terra61 high as the
+reviewer; terra61 high + sol61 high, blind, for the final all-commits review). Decide the order: quick wins first so the user sees movement, risky
 stages when quota is fresh.
 
 ## 3. Plan file
@@ -118,7 +118,7 @@ pacer stops counting the thread as triaging (only ready threads get pause
 asks; triaging ones never do). The
 pacer paces every main Claude thread, queued or not, so any lead can get
 "Pacer: over pace": finish the stage you're in (let a running Claude worker
-finish, start no new one); once it's done, if the next step is a sol61
+finish, start no new one); once it's done, if the next step is a Codex
 review or recheck, dispatch that before you pause (Codex is a separate limit; its report waits for you). Update
 Resume (note the running review), run `pacer.mjs pause --plan planning/<plan>/plan.md`, and stop. If
 the stage ends with questions for the user, don't pause: just stop, so the
@@ -139,7 +139,7 @@ at or over the cap, start one at most. For each stage, mark its items started (a
 `/tmp/<plan>/<stage>.md`, and launch it. In a T3 session the default is T3's
 `delegate_task` (subagents skill, "Dispatch": clientRequestId
 `<prefix><stage>-impl-r1`, fix rounds by `t3_thread_send` to the child; its
-completion wakes you). sol61 reviews run on `t3-thread.mjs`, which compacts a
+completion wakes you). Reviews (terra61, sol61) run on `t3-thread.mjs`, which compacts a
 REVISE reviewer at once so each recheck continues that thread (subagents skill
 "Review cadence"). The `t3-thread.mjs`
 form below is the fallback and the reference for the JOB naming:
@@ -213,8 +213,10 @@ for worker questions; answer by `board.py post --to <JOB>`.
 
 ## 7. Review
 
-One reviewer per stage (sol61 medium; high only for the final review over
-all the orchestrator's commits). Copy the subagents
+One reviewer per stage (terra61 high). The final review over all the
+orchestrator's commits goes to terra61 high and sol61 high, blind, each on its
+own thread (`<prefix>final-terra`, `<prefix>final-sol`); recheck each finding
+on the thread that raised it, and the final closes when both APPROVE. Copy the subagents
 `review-prompt.md`, fill the slots, and append
 [templates/review-addendum.md](templates/review-addendum.md) (the expectations
 check). Scope it exactly: base commit, the stage's files including untracked
@@ -222,7 +224,10 @@ ones, the other stages' dirty files to ignore, the worker's claims with line
 refs, named adversarial probes, exact test commands.
 
 ```bash
-JOB=<prefix><stage>-review EFFORT=medium setsid nohup node $S/t3-thread.mjs sol61 /tmp/<plan>/<stage>-review.md > /tmp/<plan>/<stage>-review.log 2>&1 < /dev/null &
+JOB=<prefix><stage>-review setsid nohup node $S/t3-thread.mjs terra61 /tmp/<plan>/<stage>-review.md > /tmp/<plan>/<stage>-review.log 2>&1 < /dev/null &
+# final: both, blind, same prompt
+JOB=<prefix>final-terra setsid nohup node $S/t3-thread.mjs terra61 /tmp/<plan>/final.md > /tmp/<plan>/final-terra.log 2>&1 < /dev/null &
+JOB=<prefix>final-sol EFFORT=high setsid nohup node $S/t3-thread.mjs sol61 /tmp/<plan>/final.md > /tmp/<plan>/final-sol.log 2>&1 < /dev/null &
 ```
 
 Reviewer findings are weighed, not obeyed: drop the ones that fail the
@@ -314,7 +319,7 @@ git show --stat HEAD      # only the stage's files
 ```
 
 Message: `feat(<plan> <stage>): <what the user gets>`, body with the item ids,
-`Reviewed-by: sol61 (APPROVE)` (at a §9 budget end: `Reviewed-by: sol61
+`Reviewed-by: terra61 (APPROVE)` (finals: `terra61 + sol61`; at a §9 budget end: `Reviewed-by: terra61
 (REVISE, disputed F2 F5)`, plus `closed.md` `closed: done <sha> (disputed …)`),
 and the harness's Co-Authored-By trailer. With
 a clean tree a plain `git add <files> && git commit` is fine.
