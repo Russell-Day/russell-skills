@@ -142,7 +142,9 @@ command" with the next send. While waiting, answer worker questions from
 
 Reviewers, efforts and the final pair come from the project's subagents
 "Review cadence" (default: terra61 high per stage, rechecks on its thread;
-finals terra61 high + sol61 medium, blind).
+finals terra61 high + sol61 medium, blind). A project may run an Opus high
+review loop until it APPROVEs before the terra61 review, which stays blind to
+the Opus findings (see its Review cadence).
 Copy its `review-prompt.md`, fill the slots, and append
 [templates/review-addendum.md](templates/review-addendum.md) (the expectations
 check). Scope it exactly: base commit, the stage's files including untracked,
@@ -151,6 +153,7 @@ named adversarial probes, exact test commands.
 
 ```bash
 # launched like §5 (background task, then t3_background_wait)
+JOB=<prefix><stage>-opus-review node $S/t3-thread.mjs opus /tmp/<plan>/<stage>-review.md  # optional Opus loop first
 JOB=<prefix><stage>-review node $S/t3-thread.mjs terra61 /tmp/<plan>/<stage>-review.md
 # final: both, blind, same prompt, each on its own thread
 JOB=<prefix>final-terra node $S/t3-thread.mjs terra61 /tmp/<plan>/final.md
@@ -197,7 +200,9 @@ naming only the open finding ids.
 **Budget** (adapted from t3dotgg's sol-loop): Codex rounds are the scarcest spend.
 - **3 review rounds per stage** (review + rechecks). Up to **5** only while a
   blocker with evidence stays open on security, permissions, auth, data loss
-  or state/concurrency. Every recheck sent is a round.
+  or state/concurrency. Every recheck sent is a round. An optional Opus
+  pre-review loop (a project's Review cadence) has no cap: it runs until it
+  APPROVEs or you close it; the cap applies to the terra61 review after it.
 - **Device-bound stages** (only a real device or another machine can test the
   build): iterate on the device until its log shows the fix working, then one
   recheck for that build, never one per attempt.
