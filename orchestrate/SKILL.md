@@ -39,8 +39,9 @@ The user reads only the last line of a turn, so:
 - `S=~/.agents/skills/subagents/code` (or the project's copy, e.g.
   `.agents/skills/subagents/code`).
 - No worker budget: dispatch every ready stage that shares no files with a
-  running one; with the pacer installed, the only brake is the cap check
-  before each Opus worker (subagents, "Pick the shape").
+  running one. With the pacer installed, the one brake: before each Claude
+  Opus worker read `pacer.mjs status`; at or over its `Working N/cap`, start
+  one at most.
 - Pick a plan slug `<plan>` (e.g. `62-improvements-round`) and a job prefix
   (`p62-`); every JOB, prompt file and index path uses it.
 
@@ -139,7 +140,9 @@ command" with the next send. While waiting, answer worker questions from
 
 ## 7. Review
 
-Reviewers, efforts and the final pair come from subagents "Review cadence".
+Reviewers, efforts and the final pair come from the project's subagents
+"Review cadence" (default: terra61 high per stage, rechecks on its thread;
+finals terra61 high + sol61 medium, blind).
 Copy its `review-prompt.md`, fill the slots, and append
 [templates/review-addendum.md](templates/review-addendum.md) (the expectations
 check). Scope it exactly: base commit, the stage's files including untracked,
@@ -239,7 +242,9 @@ clean tree a plain `git add <files> && git commit -- <files>` is fine.
 To test the private tree first, export it (`git checkout-index -a
 --prefix=/tmp/<plan>/verify-<stage>/` with `GIT_INDEX_FILE` still set) and run
 the stage tests there with the repo's interpreter by absolute path. Scratch
-copies never get a venv copy, symlink, `uv` or `pip` (subagents "Hard rules").
+copies never get a venv copy, symlink, `uv` or `pip`; an agent started in a
+copy auto-loads its `.mcp.json`, so repo MCP servers launch with the venv's
+python, never `uv run`.
 
 A lead at 3+ compactions hands off through the pacer (pacer skill, "Day
 protocol"); without one, make Resume current and start a fresh thread on the
