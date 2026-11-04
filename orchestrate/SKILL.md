@@ -125,8 +125,11 @@ the stage ends with questions for the user, don't pause: just stop, so the
 thread stays awake in their list.
 
 **How to wait** (same text in the pacer skill):
-- **Review or worker running:** end the turn; its report wakes you. The pacer
-  counts you as working ("waiting on review"). No polling, no ask.
+- **Review or worker running:** launch each one as its own Bash background task, then
+  call `t3_background_wait` with their task ids (T3 shows you as Waiting; without it
+  you show as Done), and end the turn; each exit wakes you. The pacer counts you as
+  working ("waiting on review"). No polling, no ask, and no `pgrep -f` wait on another
+  launch inside a task (it matches its own command line and never ends).
 - **Blocked until a known time** (a quota reset, a dated live check, another
   plan): update Resume, run `pacer.mjs pause --plan <plan> --until <time>` and
   stop. Never an ask, never just idle.
@@ -159,7 +162,8 @@ REVISE reviewer at once so each recheck continues that thread (subagents skill
 form below is the fallback and the reference for the JOB naming:
 
 ```bash
-# one Bash call each, run_in_background: true (no trailing &), so its exit wakes you
+# one Bash call each, run_in_background: true (no trailing &), so its exit wakes you;
+# then t3_background_wait with the task ids so T3 shows you as Waiting
 JOB=<prefix><stage>-impl EFFORT=<effort> TIMEOUT=90m \
   node $S/t3-thread.mjs <model> /tmp/<plan>/<stage>.md
 ```
@@ -236,7 +240,8 @@ ones, the other stages' dirty files to ignore, the worker's claims with line
 refs, named adversarial probes, exact test commands.
 
 ```bash
-# one Bash call each, run_in_background: true (no trailing &), so its exit wakes you
+# one Bash call each, run_in_background: true (no trailing &), so its exit wakes you;
+# then t3_background_wait with the task ids so T3 shows you as Waiting
 JOB=<prefix><stage>-review node $S/t3-thread.mjs terra61 /tmp/<plan>/<stage>-review.md
 # final: both, blind, same prompt
 JOB=<prefix>final-terra node $S/t3-thread.mjs terra61 /tmp/<plan>/final.md
