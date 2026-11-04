@@ -3,7 +3,7 @@
 #
 #   code/run.sh <model> <prompt-file>
 #
-# <model>: sol | sol61 | luna | astra | fable | opus | sonnet | haiku | gemini-flash
+# <model>: sol | sol61 | terra61 | luna | astra | fable | opus | sonnet | haiku | gemini-flash
 # Env overrides:
 #   EFFORT=<level>      reasoning level (default: the model's preferred level)
 #   ACCOUNT=<name>      Codex account name from accounts.local.json (default: its codex.default) | auto
@@ -36,6 +36,7 @@ kill_after=${KILL_AFTER:-30s}
 case $model in
   sol)          harness=codex  id=gpt-6-sol          effort=${EFFORT:-medium} ;;
   sol61)        harness=codex  id=gpt-6.1-sol        effort=${EFFORT:-medium} ;;
+  terra61)      harness=codex  id=gpt-6.1-terra      effort=${EFFORT:-high} ;;
   luna)         harness=codex  id=gpt-6-luna         effort=${EFFORT:-xhigh} ;;
   astra)        harness=codex  id=gpt-6-astra        effort=${EFFORT:-low} ;;   # EFFORT=medium for final checks
   fable)        harness=claude id=claude-fable-5-1   effort=${EFFORT:-medium} ;;

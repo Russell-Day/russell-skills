@@ -5,7 +5,7 @@ set -euo pipefail
 here=$(dirname "$0")
 pids=()
 for p in "$@"; do
-  JOB=review-$(basename "$p" .md)-$(date +%H%M%S) "$here/run.sh" astra "$p" &
+  JOB=review-$(basename "$p" .md)-$(date +%H%M%S) "$here/run.sh" terra61 "$p" &
   pids+=($!)
 done
 for pid in "${pids[@]}"; do wait "$pid" || true; done

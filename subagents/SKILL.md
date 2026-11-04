@@ -17,20 +17,30 @@ repo: workers run in the caller's git root, and job directories go to
 
 ## Pick the shape
 
-The plan's size (the pacer's `--size`) sets the shape: a
-worker spends ~50k tokens just getting up to speed, and leads were ~30% of
-Opus use while making almost no edits.
+The plan's size (the pacer's `--size`) sets the shape. A worker spends ~50k
+tokens and several minutes getting up to speed, so hand-offs cost real quota.
 
-- **`s` (1–2 stages): one thread, always.** The thread that owns it writes
-  the code itself; no workers.
-- **`m` (3–5 stages): the lead's choice.** In-order stages: one thread, plan
-  doc kept current, a commit after each. Stages in disjoint files: parallel
-  Opus workers.
-- **`l` (6+ stages): orchestrator.** The lead plans, dispatches workers for
-  every stage and reviews.
+- **`s` (1–2 stages): one thread, always.** The owning thread writes the code
+  itself; no workers. Small bug groups can skip the plan doc and the queue
+  too (a fast lane).
+- **`m` (3–5 stages): the lead's choice.** Stages in order (B needs A): one
+  thread works through them, keeps the plan doc current and commits after
+  each. Stages in disjoint files: parallel Opus workers. Mixed: write the
+  in-order part yourself, hand the disjoint part to workers.
+- **`l` (6+ stages): orchestrator.** The lead plans, dispatches a worker per
+  stage and reviews; it writes no stages itself.
 
-Code the lead writes gets the same sol61 review as a worker's; on REVISE the
-lead fixes its own stages, and a worker's stage goes back to that worker.
+Parallel workers buy speed, not savings. **Before each Claude Opus worker read
+`node ~/.agents/skills/pacer/scripts/pacer.mjs status`:** working under its
+`Working N/cap`, start it; at or over the cap, start one at most. Haiku, Codex
+and Gemini helpers don't count; the pacer never pauses a worker. (Without the
+pacer, the rule of thumb: four Opus workers empty a Claude 5-hour session in
+about three hours.)
+
+In every shape terra61 (high) reviews ("Review cadence"), code you write
+yourself as much as a worker's; only a fast lane's test-only, docs or config
+fixes skip it. On REVISE the lead fixes stages it wrote; a worker's stage goes
+back to that worker.
 
 ## Accounts and capacity
 
@@ -92,10 +102,10 @@ Scores are 0–10, higher is better, except **Cost**, where higher means scarcer
 
 | Label | Exact ID (harness) | Default reasoning | Orchestrator | Taste | Code | Review | Explore | Cost |
 |---|---|---|---:|---:|---:|---:|---:|---:|
-| `sol61` | `gpt-6.1-sol` (Codex) | med; **high for review** | 5 | 5 | 7 | 9 | 8 | 5 |
-| `astra` | `gpt-6-astra` (Codex) | low (med for final checks) | 8 | 7 | 8 | 9 | 8 | 7 |
+| `terra61` | `gpt-6.1-terra` (Codex) | **high**, every review and recheck | – | – | – | 9 | – | 5 |
+| `sol61` | `gpt-6.1-sol` (Codex) | **medium, final reviews only** (next to terra61); med for plan critique | 5 | 5 | 7 | 9 | 8 | 5 |
 | `fable` | `claude-fable-5-1` (Claude) | med | 10 | 8 | 8 | 8 | – | 5 |
-| `opus` | `claude-opus-5-5` (Claude) | med–high | 7 | 9 | 9 | 8 | – | 3 |
+| `opus` | `claude-opus-5-5` (Claude) | high (workers and leads) | 7 | 9 | 9 | 8 | – | 3 |
 | `haiku` | `claude-haiku-5-5` (Claude) | high | 2 | – | 4 | – | 7 | 1 |
 | `sonnet` | `claude-sonnet-5-5` (Claude) | not routed (Haiku does its helper and explorer work) | 3 | 6 | 6 | 3 | 8 | 2 |
 | `gemini-flash` | `gemini-3.8-flash-{low,medium,high}` (AGY) | high | 0 | 3 | 3 | 2 | 4 | 1 |
@@ -108,8 +118,9 @@ Scores are 0–10, higher is better, except **Cost**, where higher means scarcer
   reading live data rather than only code.
 - **Cost:** the share of the user's capacity a run uses (see above).
 
-On Codex, route only to Astra and sol61. The `sol` and `luna` labels still work
-in the scripts, but nothing routes to them. Don't silently swap model versions;
+On Codex, route only to terra61 and sol61, and only for reviews. Not routed:
+Astra, Sonnet, Luna and Antigravity's Claude models (the scripts still accept
+`sol`, `luna`, `astra`, `sonnet`). Don't silently swap model versions;
 `run.sh` refuses a model an account lacks rather than substituting. `med` means
 `medium`. The scores come from the author's own model bake-off.
 
@@ -119,23 +130,12 @@ in the scripts, but nothing routes to them. Don't silently swap model versions;
 |---|---|
 | Search, file inventories, call-path tracing, long reads (leads only; workers and reviewers do it themselves) | Gemini Flash; Haiku only as `run.sh`'s automatic step-up when Flash times out |
 | Exploration: bug hunts, "why is X broken", live-data investigation, audits | **Several Gemini Flash (high)** started by the lead; see below |
-| Implementation and integration | **Backend-only, test-only and devtools/script stages: sol61 (high) on the default Codex account** while its weekly window is under 60%; everything else, and those past 60%: **Opus (high)**. Never Gemini or Haiku |
-| UI/UX and demanding implementation | **Opus (high)**; Fable sometimes, as a second eye; Astra only for 3D modeling |
-| Long-term planning and goal management | Fable; Astra as an alternative |
-| Plan critique | Opus (high) for depth; sol61 (med) for value |
+| Implementation and fixes, UI or not | **Opus (high)**. Never Codex, Gemini or Haiku |
+| Long-term planning and goal management | Fable |
+| Plan critique | Opus (high) for depth; terra61 (high) for value |
 | Second opinion on a plan or approach | Cross-family; see below |
-| Stage review and rechecks | **sol61 (high)**, one reviewer |
-| Final check before a milestone | sol61 (high), plus Astra (medium) when quota allows |
-
-**Implementation on Codex.** When Claude's 5 h window is the bottleneck and
-Codex has room left in its week, stages with no UI go to sol61 (high) workers:
-`EFFORT=high t3-thread.mjs sol61` (`ACCOUNT` unset runs the `codex.default`
-account), or `delegate_task` on that account's T3 instance. Only the default
-account: never one `accounts.local.md` reserves for something else, and only
-while the default's weekly window is under 60% (`usage.mjs`), since the user
-uses Codex outside coding too; past that, Opus. UI/UX, hard stages and the
-lead's own `s` work stay on Opus. The sol61 review stays as is. Antigravity's
-Claude models (Opus/Sonnet 4.6) are not used.
+| Stage review, rechecks | **terra61 (high)**, one reviewer |
+| Orchestrator's final review over all its commits | **terra61 (high) + sol61 (medium)**, blind, side by side |
 
 Sonnet isn't routed: a bake-off had Haiku match it on searches, tracing, test triage and bug hunts at about a
 tenth of the cost; implementation stays on Opus. Don't use Haiku as a code
@@ -183,33 +183,56 @@ JOB=<lead>-inventory    $S/run.sh gemini-flash /tmp/<lead>-inventory.md
 
 ## Review cadence
 
-- **One reviewer per stage: sol61 at high.** It covers stage reviews, rechecks
-  and the reviews during iteration.
+- **One reviewer per stage: terra61 at high.** It covers stage reviews,
+  rechecks and second opinions: one review per commit, batching a few small
+  tasks; risky work (mail or messages, deletes, GPU, schema) is reviewed on
+  its own.
+- **Finals: terra61 high + sol61 medium, blind.** Each on its own thread with
+  the same prompt (`JOB=<plan>-final-terra` / `-final-sol`). Merge both lists,
+  recheck each finding on the thread that raised it; the final closes when
+  both APPROVE (or close notes).
 - **A multi-model fan-out only when the user asks for one,** and then once, over
   the final range.
-- **Final checks before a milestone** add Astra medium when quota allows.
-- **A recheck** is a new `delegate_task` round carrying the prior findings and
-  the fix report (on the `t3-thread.mjs` fallback: `CONTINUE` on the
-  reviewer's own thread).
+- **Rechecks go to the reviewer's own thread** (a fresh one costs as much as a
+  full review): send the filled [recheck-prompt.md](code/recheck-prompt.md)
+  with `ATTACH=$(cat <job dir>/thread_id) CONTINUE=1` and the same `JOB`. Fill
+  the template itself, never "same rules as before". A new stage gets a fresh
+  reviewer (new `JOB`).
+- **Skip the recheck for small fixes** (docs, comments, tests, or a one-line
+  change that plainly does what was asked): verify it yourself and write
+  `closed.md`: `closed: done <sha> (lead-verified: <what you checked>)`. Mail,
+  messages, deletes, GPU, schema or migration fixes still get the recheck.
 - **Scope every review exactly.** Give the base commit and the stage's files,
-  untracked ones included, and name the unrelated dirty WIP to ignore. One
-  review per stage, not per worker or commit.
-- **Every stage review ends at APPROVE or a close note.** If a review stops at
+  untracked ones included, and name the unrelated dirty WIP to ignore.
+- **Every review ends at APPROVE or a close note.** If a review stops at
   REVISE for good (stage dropped, moved, or its findings filed), write
   `closed.md` in the review's job dir, first line
   `closed: <done|moot|filed chk_…> <sha or reason>`. The weekly stats count it
   as closed; a review with neither stays open.
 - **Fill in [review-prompt.md](code/review-prompt.md)** for every stage review;
   it carries the boundary, the probes, the proportion rule and the report format.
+- **Budget:** about 3 rounds per review, 5 for an evidenced blocker
+  (orchestrate §9).
 
-Default: `delegate_task` with `clientRequestId: "plan<N>-<stage>-review-r1"` and
-target `codex` / `gpt-6.1-sol` / `{reasoningEffort: "high"}` (Dispatch, below).
-Fallback:
+Reviews run on `t3-thread.mjs`, so rechecks can continue the reviewer's own
+thread:
 
 ```bash
-JOB=stage-x-review EFFORT=high $S/t3-thread.mjs sol61 /tmp/stage-x.md
-JOB=stage-x-final  EFFORT=medium $S/t3-thread.mjs astra /tmp/final.md
+# one Bash call each, run_in_background: true (no trailing &), so its exit wakes you;
+# then (Claude leads) t3_background_wait with the task ids so T3 shows you as Waiting
+JOB=plan<N>-<stage>-review node $S/t3-thread.mjs terra61 /tmp/stage-x.md
+# REVISE -> fix -> recheck on the same reviewer thread:
+ATTACH=$(cat ~/.local/state/agent-jobs/plan<N>-<stage>-review/thread_id) CONTINUE=1 \
+  JOB=plan<N>-<stage>-review node $S/t3-thread.mjs terra61 /tmp/stage-x-recheck.md
+# orchestrator's final: both, blind, same prompt
+JOB=plan<N>-final-terra node $S/t3-thread.mjs terra61 /tmp/final.md
+JOB=plan<N>-final-sol EFFORT=medium node $S/t3-thread.mjs sol61 /tmp/final.md
 ```
+
+Fallback when `t3-thread.mjs` can't run: `delegate_task` with
+`clientRequestId: "plan<N>-<stage>-review-r1"`, target `codex` /
+`gpt-6.1-terra` / `{reasoningEffort: "high"}`; each recheck is then a new
+`delegate_task` (next `-r<N>`) carrying the prior findings and the fix report.
 
 ## Second opinions
 
@@ -219,8 +242,8 @@ family from the lead:
 
 | Lead | Adviser |
 |---|---|
-| Claude (Opus, Fable) | sol61, `EFFORT=high` |
-| Codex (Astra, sol61) | Opus, `EFFORT=medium`; Fable when the user asks |
+| Claude (Opus, Fable) | terra61, `EFFORT=high` |
+| Codex (terra61, sol61) | Opus, `EFFORT=high`; Fable when the user asks |
 
 - **What to send:** the objective, the constraints, the paths, the proposed
   approach and its alternatives, and the open decisions.
@@ -297,8 +320,9 @@ The child shows under the lead in the user's sidebar and its completion wakes
 the lead, so end the turn instead of polling. Per job:
 - `target`: `{providerInstanceId, model, options}` from
   `orchestrator_capabilities`. Workers: `claude.t3WorkerInstance` /
-  `claude-opus-5-5` / `{effort: "medium"}` (`"high"` only for UI/UX or a hard stage); non-UI stages (Routing): `codex` / `gpt-6.1-sol` / `{reasoningEffort: "high"}`; sol61: `codex` / `gpt-6.1-sol` /
-  `{reasoningEffort: "high"}`; Haiku: the Haiku profile in `accounts.local.md`.
+  `claude-opus-5-5` / `{effort: "high"}`; terra61 (review fallback): `codex` /
+  `gpt-6.1-terra` / `{reasoningEffort: "high"}`; Haiku: the Haiku profile in
+  `accounts.local.md`.
   Instance ids are this machine's: `claude.*` and `codex.accounts[].t3Instance`
   in `accounts.local.json` (`codex` is the default account's).
 - `clientRequestId`: `plan<N>-<stage>-<impl|review|fix>-r<round>`, stable
@@ -383,13 +407,15 @@ wait. Install: `cp ~/.agents/skills/subagents/systemd/reap-sessions.{service,tim
 ```bash
 S=~/.agents/skills/subagents/code
 cp $S/review-prompt.md /tmp/stage-x.md    # fill in the <...> slots
-JOB=stage-y-impl setsid nohup node $S/t3-thread.mjs opus /tmp/stage-y.md > /tmp/stage-y.log 2>&1 < /dev/null &
+# Bash run_in_background: true (no trailing &), so its exit wakes you
+JOB=stage-y-impl node $S/t3-thread.mjs opus /tmp/stage-y.md
 ```
 
 **Running threads:**
-- **Launch detached** (`setsid nohup … &`). The wrapper dies when the lead's
-  session ends, but the thread keeps running. `ATTACH=<threadId>` with the same
-  `JOB` re-polls it.
+- **Launch as a background task** (Bash `run_in_background`, no `&`), so its
+  exit wakes the lead; a `setsid … &` fork reports Done at once and wakes
+  nobody. If the wrapper dies, the thread keeps running: `ATTACH=<threadId>`
+  with the same `JOB` re-polls it.
 - **For fix loops, use `ATTACH=<threadId> CONTINUE=1`.** It sends the prompt
   file as a new turn on the same thread, keeping the thread's model and effort
   unless `EFFORT` is set. Use it for review → fix → recheck instead of fresh
@@ -460,7 +486,6 @@ Templates: [review-prompt.md](code/review-prompt.md) and
   files.
 - **AGY file tools ignore `cwd`.** `run.sh` passes `--add-dir "$CWD"`.
 - **Nobody runs `git stash`, `reset` or `checkout` in the main tree.**
-- **Four Opus workers empty a Claude 5-hour session in about three hours** (once all four died at once, the lead too). T3 resumes limited threads after the reset, but the work stalls until then: before each Claude Opus worker read `node ~/.agents/skills/pacer/scripts/pacer.mjs status`; working < cap: start it; at or over the cap: start one at most.
 - **T3 threads need a T3 project.** `t3-thread.mjs` matches the git root (or,
   from a linked worktree, the main tree) against T3's projects. If none matches,
   run `t3 project add <dir>` or set `PROJECT_ROOT`.
