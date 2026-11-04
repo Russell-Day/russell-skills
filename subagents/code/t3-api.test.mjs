@@ -53,13 +53,13 @@ test("renameThread sends T3's thread.metadata.update with the title", async () =
 });
 
 test("orchestratorArgs: title and brief, --model/--effort in any order, defaults opus medium", () => {
-  assert.deepEqual(orchestratorArgs(["Round 4: board lanes", "brief.md"]), { title: "Round 4: board lanes", briefFile: "brief.md", model: "opus", effort: "medium" });
+  assert.deepEqual(orchestratorArgs(["Round 4: board lanes", "brief.md"]), { title: "Round 4: board lanes", briefFile: "brief.md", model: "opus", effort: "high" });
   assert.deepEqual(orchestratorArgs(["--effort", "high", "T", "b.md", "--model", "fable"]), { title: "T", briefFile: "b.md", model: "fable", effort: "high" });
   for (const bad of [[], ["T"], ["  ", "b.md"], ["T", "b.md", "extra"], ["T", "b.md", "--model"]]) assert.throws(() => orchestratorArgs(bad), /usage|needs a value/);
 });
 
 test("mainModelSelection: the orchestrator profile, never the worker profile", () => {
-  assert.deepEqual(mainModelSelection(), { instanceId: claude.t3Instance, model: "claude-opus-5-5", options: [{ id: "effort", value: "medium" }, { id: "fastMode", value: false }] });
+  assert.deepEqual(mainModelSelection(), { instanceId: claude.t3Instance, model: "claude-opus-5-5", options: [{ id: "effort", value: "high" }, { id: "fastMode", value: false }] });
   assert.deepEqual(mainModelSelection("fable", "high"), { instanceId: claude.t3Instance, model: "claude-fable-5-1", options: [{ id: "effort", value: "high" }] });
   assert.notEqual(mainModelSelection().instanceId, claude.t3WorkerInstance);
   assert.throws(() => mainModelSelection("gpt"), /--model is/);

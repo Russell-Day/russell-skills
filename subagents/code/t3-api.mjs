@@ -457,7 +457,7 @@ export async function detachSession(threadId, providerSessionId, reason, send = 
 
 // Claude models a main (orchestrator) thread can run, on the orchestrator profile.
 const mainModels = { opus: "claude-opus-5-5", fable: "claude-fable-5-1", sonnet: "claude-sonnet-5-5", haiku: "claude-haiku-5-5" };
-export function mainModelSelection(model = "opus", effort = "medium") {
+export function mainModelSelection(model = "opus", effort = "high") {
   const id = mainModels[model];
   if (!id) throw new Error(`--model is ${Object.keys(mainModels).join(", ")}`);
   return { instanceId: claudeAccount.t3Instance, model: id, options: [{ id: "effort", value: effort }, ...(model === "opus" ? [{ id: "fastMode", value: false }] : [])] };
@@ -473,14 +473,14 @@ export function codexMainSelection(model = "gpt-6.1-sol", effort = "high") {
 
 // `--orchestrator "<title>" <brief-file> [--model opus] [--effort medium]`, options in any order.
 export function orchestratorArgs(argv) {
-  const opts = { model: "opus", effort: "medium" };
+  const opts = { model: "opus", effort: "high" };
   const rest = [];
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === "--model" || argv[i] === "--effort") { if (argv[i + 1] == null) throw new Error(`${argv[i]} needs a value`); opts[argv[i].slice(2)] = argv[++i]; }
     else rest.push(argv[i]);
   }
   const [title, briefFile, ...extra] = rest;
-  if (!title?.trim() || !briefFile || extra.length) throw new Error('usage: t3-thread.mjs --orchestrator "<title>" <brief-file> [--model opus] [--effort medium]');
+  if (!title?.trim() || !briefFile || extra.length) throw new Error('usage: t3-thread.mjs --orchestrator "<title>" <brief-file> [--model opus] [--effort high]');
   return { title: title.trim(), briefFile, ...opts };
 }
 
