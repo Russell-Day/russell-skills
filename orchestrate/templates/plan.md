@@ -5,7 +5,7 @@ Source: <adapter: an issue tracker | <path>/TODO.md | …>. Items read <date>.
 
 | Stage | Items | Files owned | Live replay | Model | Reviewer | Status |
 |---|---|---|---|---|---|---|
-| S1 <title> | `<id>` <short>, `<id>` <short> | <dirs/files> | <snapshot, when the stage changes how the live app answers \| —> | opus med | terra61 high | planned / dispatched (<thread>) / review / fix r1 / APPROVE / committed <sha> |
+| S1 <title> | `<id>` <short>, `<id>` <short> | <dirs/files> | <snapshot, when the stage changes how the live app answers \| —> | opus med | <per Review cadence: terra61 high, or opus high → terra61 high> | planned / dispatched (<thread>) / review / fix r1 / APPROVE / committed <sha> |
 | S2 <title> | … | … | … | … | … | … |
 
 Skipped or deferred: `<id>` <why>.
@@ -24,6 +24,6 @@ What a thread woken by the pacer reads first. Update it before `enqueue` and `pa
 - **Next step:** <exact next action, e.g. "dispatch S3 with /tmp/<plan>/s3.md">
 - **Open risks:** <what could go wrong, what to check first>
 
-Each stage: worker leaves changes uncommitted and lists its files; one <reviewer>
-review; lead commits on APPROVE (<plain | private index with HEAD check>), one
+Each stage: worker leaves changes uncommitted and lists its files; <reviewer(s) per the
+Review cadence> review; lead commits on APPROVE (<plain | private index with HEAD check>), one
 stage per commit, then marks items done with the sha.
