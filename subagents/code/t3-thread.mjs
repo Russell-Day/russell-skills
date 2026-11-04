@@ -42,7 +42,7 @@
 // before the new one starts; its id moves to `thread_ids_prev` and run.log gets
 // `handoff <old>→<new> (N compactions)`.
 //
-// A reviewer (sol61, astra) attached under a JOB other than the one whose job dir records the
+// A reviewer (terra61, sol61, astra) attached under a JOB other than the one whose job dir records the
 // thread (`thread_id`, or a line of `thread_ids_prev`) is a new stage: a fresh reviewer thread
 // starts instead, and stderr and run.log say `new stage <oldjob>→<job>: fresh reviewer thread`.
 // Rechecks pass the same JOB and continue. Workers continue under any JOB.
@@ -107,7 +107,7 @@ if (process.argv[2] === "--orchestrator") {
 
 const [model, promptSrc] = process.argv.slice(2);
 if (!model || !promptSrc) {
-  console.error("usage: t3-thread.mjs <sol|sol61|luna|astra|fable|opus|sonnet|haiku|gemini-flash> <prompt-file>");
+  console.error("usage: t3-thread.mjs <sol|sol61|terra61|luna|astra|fable|opus|sonnet|haiku|gemini-flash> <prompt-file>");
   process.exit(2);
 }
 
@@ -160,6 +160,7 @@ function selection(label) {
   switch (label) {
     case "sol": return codex("gpt-6-sol", "medium");
     case "sol61": return codex("gpt-6.1-sol", "medium");
+    case "terra61": return codex("gpt-6.1-terra", "high"); // every review; finals pair it with sol61 medium
     case "luna": return codex("gpt-6-luna", "xhigh");
     case "astra": return codex("gpt-6-astra", "low"); // EFFORT=medium for final checks
     case "fable": return claude("claude-fable-5-1", []);
@@ -214,7 +215,7 @@ if (model === "gemini-flash") {
 
 // The label and Codex account of the selection a thread really runs on: an attached or
 // continued thread keeps its own model, whatever label and ACCOUNT the CLI was given.
-const labelFor = (id) => ({ "gpt-6-sol": "sol", "gpt-6.1-sol": "sol61", "gpt-6-luna": "luna", "gpt-6-astra": "astra",
+const labelFor = (id) => ({ "gpt-6-sol": "sol", "gpt-6.1-sol": "sol61", "gpt-6.1-terra": "terra61", "gpt-6-luna": "luna", "gpt-6-astra": "astra",
   "claude-fable-5-1": "fable", "claude-opus-5-5": "opus", "claude-sonnet-5-5": "sonnet", "claude-haiku-5-5": "haiku" })[id]
   ?? (/^gemini-3\.8-flash-/.test(id) ? "gemini-flash" : null);
 const codexAccountOf = (instanceId) => codexByInstance(instanceId)?.name ?? null;
@@ -303,7 +304,7 @@ let handoff = null;
 // Reviewer threads stay with their stage: the job that recorded a thread (its
 // `thread_id` or a `thread_ids_prev` line). This job's own record wins (a recheck); else the
 // first other job found, or null when no job dir knows the thread.
-const REVIEWERS = ["sol61", "astra"];
+const REVIEWERS = ["sol61", "terra61", "astra"];
 const recorded = (dir, threadId) => ["thread_id", "thread_ids_prev"].some((f) => {
   try { return fs.readFileSync(path.join(dir, f), "utf8").split(/\s+/).includes(threadId); } catch { return false; }
 });
