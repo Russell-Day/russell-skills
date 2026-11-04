@@ -78,7 +78,7 @@ Group items into stages so that:
 
 Assign a model per stage from the subagents routing table (Opus for
 implementation and UI, terra61 high as the
-reviewer; terra61 high + sol61 high, blind, for the final all-commits review). Decide the order: quick wins first so the user sees movement, risky
+reviewer; terra61 high + sol61 medium, blind, for the final all-commits review). Decide the order: quick wins first so the user sees movement, risky
 stages when quota is fresh.
 
 ## 3. Plan file
@@ -214,7 +214,7 @@ for worker questions; answer by `board.py post --to <JOB>`.
 ## 7. Review
 
 One reviewer per stage (terra61 high). The final review over all the
-orchestrator's commits goes to terra61 high and sol61 high, blind, each on its
+orchestrator's commits goes to terra61 high and sol61 medium, blind, each on its
 own thread (`<prefix>final-terra`, `<prefix>final-sol`); recheck each finding
 on the thread that raised it, and the final closes when both APPROVE. Copy the subagents
 `review-prompt.md`, fill the slots, and append
@@ -227,7 +227,7 @@ refs, named adversarial probes, exact test commands.
 JOB=<prefix><stage>-review setsid nohup node $S/t3-thread.mjs terra61 /tmp/<plan>/<stage>-review.md > /tmp/<plan>/<stage>-review.log 2>&1 < /dev/null &
 # final: both, blind, same prompt
 JOB=<prefix>final-terra setsid nohup node $S/t3-thread.mjs terra61 /tmp/<plan>/final.md > /tmp/<plan>/final-terra.log 2>&1 < /dev/null &
-JOB=<prefix>final-sol EFFORT=high setsid nohup node $S/t3-thread.mjs sol61 /tmp/<plan>/final.md > /tmp/<plan>/final-sol.log 2>&1 < /dev/null &
+JOB=<prefix>final-sol EFFORT=medium setsid nohup node $S/t3-thread.mjs sol61 /tmp/<plan>/final.md > /tmp/<plan>/final-sol.log 2>&1 < /dev/null &
 ```
 
 Reviewer findings are weighed, not obeyed: drop the ones that fail the
