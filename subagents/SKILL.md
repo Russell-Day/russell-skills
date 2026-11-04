@@ -103,7 +103,7 @@ Scores are 0–10, higher is better, except **Cost**, where higher means scarcer
 | Label | Exact ID (harness) | Default reasoning | Orchestrator | Taste | Code | Review | Explore | Cost |
 |---|---|---|---:|---:|---:|---:|---:|---:|
 | `terra61` | `gpt-6.1-terra` (Codex) | **high**, every review and recheck | – | – | – | 9 | – | 5 |
-| `sol61` | `gpt-6.1-sol` (Codex) | **medium, final reviews only** (next to terra61); med for plan critique | 5 | 5 | 7 | 9 | 8 | 5 |
+| `sol61` | `gpt-6.1-sol` (Codex) | **high, final reviews only** (alone) | 5 | 5 | 7 | 9 | 8 | 5 |
 | `fable` | `claude-fable-5-1` (Claude) | med | 10 | 8 | 8 | 8 | – | 5 |
 | `opus` | `claude-opus-5-5` (Claude) | high (workers and leads) | 7 | 9 | 9 | 8 | – | 3 |
 | `haiku` | `claude-haiku-5-5` (Claude) | high | 2 | – | 4 | – | 7 | 1 |
@@ -135,7 +135,7 @@ Astra, Sonnet, Luna and Antigravity's Claude models (the scripts still accept
 | Plan critique | Opus (high) for depth; terra61 (high) for value |
 | Second opinion on a plan or approach | Cross-family; see below |
 | Stage review, rechecks | **terra61 (high)**, one reviewer |
-| Orchestrator's final review over all its commits | **terra61 (high) + sol61 (medium)**, blind, side by side |
+| Orchestrator's final review over all its commits | **sol61 (high)** alone |
 
 Sonnet isn't routed: a bake-off had Haiku match it on searches, tracing, test triage and bug hunts at about a
 tenth of the cost; implementation stays on Opus. Don't use Haiku as a code
@@ -187,10 +187,8 @@ JOB=<lead>-inventory    $S/run.sh gemini-flash /tmp/<lead>-inventory.md
   rechecks and second opinions: one review per commit, batching a few small
   tasks; risky work (mail or messages, deletes, GPU, schema) is reviewed on
   its own.
-- **Finals: terra61 high + sol61 medium, blind.** Each on its own thread with
-  the same prompt (`JOB=<plan>-final-terra` / `-final-sol`). Merge both lists,
-  recheck each finding on the thread that raised it; the final closes when
-  both APPROVE (or close notes).
+- **Finals: sol61 high alone** (`JOB=<plan>-final-sol`). Rechecks on its
+  thread; the final closes on its APPROVE (or a close note).
 - **A multi-model fan-out only when the user asks for one,** and then once, over
   the final range.
 - **Rechecks go to the reviewer's own thread** (a fresh one costs as much as a
@@ -224,9 +222,8 @@ JOB=plan<N>-<stage>-review node $S/t3-thread.mjs terra61 /tmp/stage-x.md
 # REVISE -> fix -> recheck on the same reviewer thread:
 ATTACH=$(cat ~/.local/state/agent-jobs/plan<N>-<stage>-review/thread_id) CONTINUE=1 \
   JOB=plan<N>-<stage>-review node $S/t3-thread.mjs terra61 /tmp/stage-x-recheck.md
-# orchestrator's final: both, blind, same prompt
-JOB=plan<N>-final-terra node $S/t3-thread.mjs terra61 /tmp/final.md
-JOB=plan<N>-final-sol EFFORT=medium node $S/t3-thread.mjs sol61 /tmp/final.md
+# orchestrator's final: sol61 high alone
+JOB=plan<N>-final-sol node $S/t3-thread.mjs sol61 /tmp/final.md
 ```
 
 Fallback when `t3-thread.mjs` can't run: `delegate_task` with

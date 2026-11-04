@@ -140,9 +140,9 @@ command" with the next send. While waiting, answer worker questions from
 
 ## 7. Review
 
-Reviewers, efforts and the final pair come from the project's subagents
+Reviewers, efforts and the final reviewer come from the project's subagents
 "Review cadence" (default: terra61 high per stage, rechecks on its thread;
-finals terra61 high + sol61 medium, blind). A project may run an Opus high
+finals sol61 high alone). A project may run an Opus high
 review loop until it APPROVEs before the terra61 review, which stays blind to
 the Opus findings (see its Review cadence).
 Copy its `review-prompt.md`, fill the slots, and append
@@ -155,9 +155,8 @@ named adversarial probes, exact test commands.
 # launched like §5 (background task, then t3_background_wait)
 JOB=<prefix><stage>-opus-review node $S/t3-thread.mjs opus /tmp/<plan>/<stage>-review.md  # optional Opus loop first
 JOB=<prefix><stage>-review node $S/t3-thread.mjs terra61 /tmp/<plan>/<stage>-review.md
-# final: both, blind, same prompt, each on its own thread
-JOB=<prefix>final-terra node $S/t3-thread.mjs terra61 /tmp/<plan>/final.md
-JOB=<prefix>final-sol EFFORT=medium node $S/t3-thread.mjs sol61 /tmp/<plan>/final.md
+# final: sol61 high alone
+JOB=<prefix>final-sol node $S/t3-thread.mjs sol61 /tmp/<plan>/final.md
 ```
 
 Findings are weighed, not obeyed (§9).
@@ -239,7 +238,7 @@ git show --stat HEAD      # only the stage's files
 ```
 
 Message: `feat(<plan> <stage>): <what the user gets>`, body with the item ids,
-`Reviewed-by: terra61 (APPROVE)` (finals: `terra61 + sol61`; at a budget end:
+`Reviewed-by: terra61 (APPROVE)` (finals: `sol61 (APPROVE)`; at a budget end:
 `Reviewed-by: terra61 (REVISE, disputed F2 F5)`, plus `closed.md` `closed:
 done <sha> (disputed …)`), and the harness's Co-Authored-By trailer. With a
 clean tree a plain `git add <files> && git commit -- <files>` is fine.

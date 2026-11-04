@@ -159,8 +159,8 @@ function selection(label) {
   });
   switch (label) {
     case "sol": return codex("gpt-6-sol", "medium");
-    case "sol61": return codex("gpt-6.1-sol", "medium");
-    case "terra61": return codex("gpt-6.1-terra", "high"); // every review; finals pair it with sol61 medium
+    case "sol61": return codex("gpt-6.1-sol", "high"); // finals, alone
+    case "terra61": return codex("gpt-6.1-terra", "high"); // every stage review; finals are sol61 alone
     case "luna": return codex("gpt-6-luna", "xhigh");
     case "astra": return codex("gpt-6-astra", "low"); // EFFORT=medium for final checks
     case "fable": return claude("claude-fable-5-1", []);
