@@ -35,7 +35,7 @@ kill_after=${KILL_AFTER:-30s}
 # Label -> harness, exact model ID, preferred reasoning level.
 case $model in
   sol)          harness=codex  id=gpt-6-sol          effort=${EFFORT:-medium} ;;
-  sol61)        harness=codex  id=gpt-6.1-sol        effort=${EFFORT:-medium} ;;
+  sol61)        harness=codex  id=gpt-6.1-sol        effort=${EFFORT:-high} ;;
   terra61)      harness=codex  id=gpt-6.1-terra      effort=${EFFORT:-high} ;;
   luna)         harness=codex  id=gpt-6-luna         effort=${EFFORT:-xhigh} ;;
   astra)        harness=codex  id=gpt-6-astra        effort=${EFFORT:-low} ;;   # EFFORT=medium for final checks

@@ -317,7 +317,7 @@ test("ACCOUNT=auto Codex retry: each attempt records its own account", () => {
   const created = f.sent("thread.create");
   assert.deepEqual(created.map((c) => c.modelSelection.instanceId), [dflt.t3Instance, other.t3Instance]);
   assert.deepEqual(f.attempts("retry").map((a) => [...row(a), a.thread_id]),
-    [["sol61", "gpt-6.1-sol", "medium", dflt.name, 1, created[0].threadId], ["sol61", "gpt-6.1-sol", "medium", other.name, 0, created[1].threadId]]);
+    [["sol61", "gpt-6.1-sol", "high", dflt.name, 1, created[0].threadId], ["sol61", "gpt-6.1-sol", "high", other.name, 0, created[1].threadId]]);
   assert.deepEqual(f.sent("thread.settle").map((c) => c.threadId), [created[0].threadId], "the limited thread is settled; NO_SETTLE keeps the last");
   const types = f.sent().map((c) => c.type);
   assert.ok(types.indexOf("thread.settle") < types.lastIndexOf("thread.create"), `settled before the retry starts: ${types}`);

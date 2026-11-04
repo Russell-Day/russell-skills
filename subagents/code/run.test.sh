@@ -193,7 +193,7 @@ check "codex retry: exit 0" test $rc -eq 0
 check "codex retry: report from the second account" has "$jobs/retry/report.md" "codex report"
 check "codex retry: CODEX_HOME per attempt" test "$(cat "$HOME_/codex.homes" | tr '\n' ' ')" = "$(home_of "$first") $(home_of "$second") "
 check "codex retry: attempts record each account" test "$(jq_ "$jobs/retry/attempts.jsonl" '[(r["model_label"], r["model_id"], r["effort"], r["account"], r["exit"]) for r in rows]')" \
-  = "[('sol61', 'gpt-6.1-sol', 'medium', '$first', 1), ('sol61', 'gpt-6.1-sol', 'medium', '$second', 0)]"
+  = "[('sol61', 'gpt-6.1-sol', 'high', '$first', 1), ('sol61', 'gpt-6.1-sol', 'high', '$second', 0)]"
 check "codex retry: start/end parse, in order" ordered "$jobs/retry/attempts.jsonl"
 
 echo "$((n - fails))/$n passed"
