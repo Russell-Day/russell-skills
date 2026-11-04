@@ -124,6 +124,20 @@ Resume (note the running review), run `pacer.mjs pause --plan planning/<plan>/pl
 the stage ends with questions for the user, don't pause: just stop, so the
 thread stays awake in their list.
 
+**How to wait** (same text in the pacer skill):
+- **Review or worker running:** end the turn; its report wakes you. The pacer
+  counts you as working ("waiting on review"). No polling, no ask.
+- **Blocked until a known time** (a quota reset, a dated live check, another
+  plan): update Resume, run `pacer.mjs pause --plan <plan> --until <time>` and
+  stop. Never an ask, never just idle.
+- **All stages committed, only a live check left:** `pacer.mjs built --plan
+  <plan>`, then `pause --until` the check time.
+- **Only the user can unblock it** (a decision, a tap on a device): the
+  question lane (their ask tracker). Nothing else goes there.
+
+A thread with no plan (or no pacer) waits for a known time with
+`continuity.mjs nudge` instead.
+
 **While the user is asleep.** Before ending a turn on a question, run
 `node ~/.agents/skills/pacer/scripts/pacer.mjs sleep`. Its fresh output is
 what counts, not an older wake message: if it prints `asleep`, don't end the turn on a question while another
@@ -181,15 +195,13 @@ lead writes are reviewed and committed exactly like a worker's.
 
 ## 6. Wait
 
-Poll the job directory for `exit_code`
-(`~/.local/state/agent-jobs/<JOB>/`, or the project copy's job root):
+Follow "How to wait" (section 4): end the turn and let the report wake you.
+A `delegate_task` child wakes you when it completes; launch a `t3-thread.mjs`
+job as a background task of your harness (Claude Code: Bash
+`run_in_background`) so its exit wakes you. No sleep loops.
 
-```bash
-J=~/.local/state/agent-jobs/<JOB>
-until [ -f $J/exit_code ]; do sleep 60; done; cat $J/exit_code; tail -40 $J/report.md
-```
-
-For a `CONTINUE` turn the same `exit_code` file is rewritten, so compare its
+When woken, read the job directory (`~/.local/state/agent-jobs/<JOB>/`, or the
+project copy's job root): `exit_code`, then `report.md`. For a `CONTINUE` turn the same `exit_code` file is rewritten, so compare its
 mtime with the launch time in epoch seconds (`stat -c %Y`), never `-nt` against
 the wrapper log. Exit 0 is not acceptance: read `report.md`, the `VERDICT:`
 line, the file list and `git status`. If the wrapper died (lead restarted), the
