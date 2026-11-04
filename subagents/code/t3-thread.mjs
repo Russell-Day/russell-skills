@@ -17,7 +17,7 @@
 // renames the thread the caller runs in (found from its Claude Code or Codex
 // session, as continuity.mjs does), or --thread.
 //
-//   node t3-thread.mjs --orchestrator "<title>" <brief-file> [--model opus] [--effort medium]
+//   node t3-thread.mjs --orchestrator "<title>" <brief-file> [--model opus] [--effort high]
 //
 // starts a MAIN thread (orchestrator profile) in the caller's T3 project, titled
 // exactly <title>, with the brief as its first message (not pinned: T3's Working section shows
@@ -151,7 +151,7 @@ function selection(label) {
       { id: "serviceTier", value: "default" },
     ],
   });
-  const claude = (id, extra, defaultEffort = "medium") => ({
+  const claude = (id, extra, defaultEffort = "high") => ({
     // Same Claude account as orchestrators, with a 200K auto-compact window.
     instanceId: claudeAccount.t3WorkerInstance,
     model: id,

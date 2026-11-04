@@ -39,7 +39,7 @@ case $model in
   luna)         harness=codex  id=gpt-6-luna         effort=${EFFORT:-xhigh} ;;
   astra)        harness=codex  id=gpt-6-astra        effort=${EFFORT:-low} ;;   # EFFORT=medium for final checks
   fable)        harness=claude id=claude-fable-5-1   effort=${EFFORT:-medium} ;;
-  opus)         harness=claude id=claude-opus-5-5    effort=${EFFORT:-medium} ;;
+  opus)         harness=claude id=claude-opus-5-5    effort=${EFFORT:-high} ;;
   sonnet)       harness=claude id=claude-sonnet-5-5  effort=${EFFORT:-high} ;;
   haiku)        harness=claude id=claude-haiku-5-5   effort=${EFFORT:-high} ;;
   gemini-flash) harness=agy    effort=${EFFORT:-high}

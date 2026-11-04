@@ -119,10 +119,10 @@ in the scripts, but nothing routes to them. Don't silently swap model versions;
 |---|---|
 | Search, file inventories, call-path tracing, long reads (leads only; workers and reviewers do it themselves) | Gemini Flash; Haiku only as `run.sh`'s automatic step-up when Flash times out |
 | Exploration: bug hunts, "why is X broken", live-data investigation, audits | **Several Gemini Flash (high)** started by the lead; see below |
-| Implementation and integration | **Backend-only, test-only and devtools/script stages: sol61 (high) on the default Codex account** while its weekly window is under 60%; everything else, and those past 60%: **Opus (medium)**, high only for a stage the plan marks hard. Never Gemini or Haiku |
+| Implementation and integration | **Backend-only, test-only and devtools/script stages: sol61 (high) on the default Codex account** while its weekly window is under 60%; everything else, and those past 60%: **Opus (high)**. Never Gemini or Haiku |
 | UI/UX and demanding implementation | **Opus (high)**; Fable sometimes, as a second eye; Astra only for 3D modeling |
 | Long-term planning and goal management | Fable; Astra as an alternative |
-| Plan critique | Opus (med) for depth; sol61 (med) for value |
+| Plan critique | Opus (high) for depth; sol61 (med) for value |
 | Second opinion on a plan or approach | Cross-family; see below |
 | Stage review and rechecks | **sol61 (high)**, one reviewer |
 | Final check before a milestone | sol61 (high), plus Astra (medium) when quota allows |
