@@ -119,7 +119,7 @@ asks; triaging ones never do). The
 pacer paces every main Claude thread, queued or not, so any lead can get
 "Pacer: over pace": finish the stage you're in (let a running Claude worker
 finish, start no new one); once it's done, if the next step is a Codex
-review or recheck, dispatch that before you pause (Codex is a separate limit; its report waits for you). Update
+review or recheck, dispatch that before you pause, detached (`setsid nohup … &`, so its finish doesn't wake you while queued; Codex is a separate limit and its report waits for you). Update
 Resume (note the running review), run `pacer.mjs pause --plan planning/<plan>/plan.md`, and stop. If
 the stage ends with questions for the user, don't pause: just stop, so the
 thread stays awake in their list.
@@ -159,9 +159,9 @@ REVISE reviewer at once so each recheck continues that thread (subagents skill
 form below is the fallback and the reference for the JOB naming:
 
 ```bash
+# one Bash call each, run_in_background: true (no trailing &), so its exit wakes you
 JOB=<prefix><stage>-impl EFFORT=<effort> TIMEOUT=90m \
-  setsid nohup node $S/t3-thread.mjs <model> /tmp/<plan>/<stage>.md \
-  > /tmp/<plan>/<stage>.log 2>&1 < /dev/null &
+  node $S/t3-thread.mjs <model> /tmp/<plan>/<stage>.md
 ```
 
 Rules the prompt must carry (the template has them):
@@ -236,10 +236,11 @@ ones, the other stages' dirty files to ignore, the worker's claims with line
 refs, named adversarial probes, exact test commands.
 
 ```bash
-JOB=<prefix><stage>-review setsid nohup node $S/t3-thread.mjs terra61 /tmp/<plan>/<stage>-review.md > /tmp/<plan>/<stage>-review.log 2>&1 < /dev/null &
+# one Bash call each, run_in_background: true (no trailing &), so its exit wakes you
+JOB=<prefix><stage>-review node $S/t3-thread.mjs terra61 /tmp/<plan>/<stage>-review.md
 # final: both, blind, same prompt
-JOB=<prefix>final-terra setsid nohup node $S/t3-thread.mjs terra61 /tmp/<plan>/final.md > /tmp/<plan>/final-terra.log 2>&1 < /dev/null &
-JOB=<prefix>final-sol EFFORT=medium setsid nohup node $S/t3-thread.mjs sol61 /tmp/<plan>/final.md > /tmp/<plan>/final-sol.log 2>&1 < /dev/null &
+JOB=<prefix>final-terra node $S/t3-thread.mjs terra61 /tmp/<plan>/final.md
+JOB=<prefix>final-sol EFFORT=medium node $S/t3-thread.mjs sol61 /tmp/<plan>/final.md
 ```
 
 Reviewer findings are weighed, not obeyed: drop the ones that fail the
@@ -272,7 +273,7 @@ worker thread**:
 
 ```bash
 ATTACH=$(cat ~/.local/state/agent-jobs/<prefix><stage>-impl/thread_id) CONTINUE=1 \
-  JOB=<prefix><stage>-impl setsid nohup node $S/t3-thread.mjs <model> /tmp/<plan>/<stage>-fix.md > … &
+  JOB=<prefix><stage>-impl node $S/t3-thread.mjs <model> /tmp/<plan>/<stage>-fix.md
 ```
 
 **A worker past 3 compactions gets no new round.** Check first
