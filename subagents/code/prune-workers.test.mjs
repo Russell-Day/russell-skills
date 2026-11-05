@@ -1,4 +1,5 @@
 // node --test subagents/code/prune-workers.test.mjs
+import "./testdata/use-test-accounts.mjs"; // first: fixed test accounts
 import assert from "node:assert/strict";
 import path from "node:path";
 import test from "node:test";

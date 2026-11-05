@@ -1,4 +1,5 @@
 // End to end: the real t3-thread.mjs CLI against a fake T3 (testdata/fake-t3.mjs).
+import "./testdata/use-test-accounts.mjs"; // first: fixed test accounts
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";

@@ -6,6 +6,7 @@
 #   bash code/run.test.sh
 set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
+export ACCOUNTS_FILE="$here/testdata/accounts.test.json"  # fixed test accounts, not this machine's
 run_sh=$here/run.sh
 fails=0 n=0
 
@@ -72,7 +73,7 @@ state() {  # $1 checkedAt offset (min), $2 usedPercent, $3 resetsAt offset (min)
 launch() { launch_as gemini-flash "$@"; }
 launch_as() {  # $1 model label, $2 JOB, rest: extra env
   local model=$1 job=$2; shift 2
-  env -i PATH="$bin:$PATH" HOME="$HOME_" AGENT_JOBS_DIR="$jobs" JOB="$job" TIMEOUT=60s \
+  env -i PATH="$bin:$PATH" HOME="$HOME_" ACCOUNTS_FILE="$ACCOUNTS_FILE" AGENT_JOBS_DIR="$jobs" JOB="$job" TIMEOUT=60s \
     MESSAGE_BOARD_SCRIPT="$bin/board-ok" "$@" bash "$run_sh" "$model" "$HOME_/prompt.md" >/dev/null 2>"$HOME_/stderr"
 }
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // This machine's account setup: Claude config dir and T3 profiles, Codex
-// accounts (home, T3 instance, reserve flag), extra job roots. Read from accounts.local.json at
-// the repo root, else accounts.example.json.
+// accounts (home, T3 instance, reserve flag), extra job roots. Read from $ACCOUNTS_FILE, else
+// accounts.local.json at the repo root, else accounts.example.json.
 //
 //   node accounts.mjs codex-home <name>   absolute CODEX_HOME for an account
 //   node accounts.mjs codex-default       account used when ACCOUNT is unset
@@ -16,6 +16,8 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
 const expand = (p) => (p === "~" ? os.homedir() : p.startsWith("~/") ? path.join(os.homedir(), p.slice(2)) : p);
 
 function load() {
+  // ACCOUNTS_FILE overrides (the test suites point it at testdata/accounts.test.json).
+  if (process.env.ACCOUNTS_FILE) return JSON.parse(fs.readFileSync(path.resolve(process.env.ACCOUNTS_FILE), "utf8"));
   for (const name of ["accounts.local.json", "accounts.example.json"]) {
     try { return JSON.parse(fs.readFileSync(path.join(root, name), "utf8")); }
     catch (e) { if (e.code !== "ENOENT") throw new Error(`${name}: ${e.message}`); }
