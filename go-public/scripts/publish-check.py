@@ -21,7 +21,9 @@ comments). Default: `personal.local.txt` next to this skill (git-ignored), or
 $GO_PUBLIC_PERSONAL. See `personal.example.txt`.
 
 Repo allowlist `.publish-check-ignore` (optional, at the repo root):
-  path:<glob>      skip matching paths in the personal/email scans
+  path:<glob>      skip matching paths in the personal/email scans, and count
+                   matching data/binary/agent files as reviewed (key and
+                   credential files always BLOCK)
   allow:<literal>  a match containing this literal is fine (e.g. your public name)
 """
 from __future__ import annotations
@@ -288,9 +290,11 @@ def check_authors(repo: Path, personal, allows, rep: Report, sec="Personal info"
         rep.add(sec, "INFO", f"commit identities: {len(ids)}, all noreply/allowlisted")
 
 
-def check_files(repo: Path, root: Path, files, personal, max_mb: float, rep: Report, sec="Files"):
+def check_files(repo: Path, root: Path, files, personal, max_mb: float, rep: Report, sec="Files", reviewed=()):
     def match(name, globs):
         b = os.path.basename(name)
+        if lvl_review and skipped(name, reviewed):  # triaged in .publish-check-ignore
+            return False
         return b not in SENSITIVE_OK and any(fnmatch.fnmatch(b, g) for g in globs)
 
     added = sh(["git", "-C", str(repo), "log", "--all", "--diff-filter=A", "--name-only", "--format="]).stdout
@@ -298,13 +302,14 @@ def check_files(repo: Path, root: Path, files, personal, max_mb: float, rep: Rep
     for globs, lvl, what in ((SENSITIVE_NAMES, "BLOCK", "key/env/credential files"),
                              (DATA_NAMES, "REVIEW", "data files (databases, logs, mail, exports): real data or fixtures?"),
                              (BINARY_NAMES, "REVIEW", "built binaries/archives (unreviewable; rebuild from source or attach to a release)")):
+        lvl_review = lvl == "REVIEW"
         now = [f for f in files if match(f, globs)]
         if now:
             rep.add(sec, lvl, f"{what}, would be pushed", now)
         hist = sorted({f for f in added if match(f, globs)} - set(now))
         if hist:
             rep.add(sec, lvl, f"{what}, deleted now but still in history", hist)
-    agent_now = [f for f in files if any(fnmatch.fnmatch(f, g) or fnmatch.fnmatch(os.path.basename(f), g) for g in AGENT_NAMES)]
+    agent_now = [f for f in files if not skipped(f, reviewed) and any(fnmatch.fnmatch(f, g) or fnmatch.fnmatch(os.path.basename(f), g) for g in AGENT_NAMES)]
     if agent_now:
         rep.add(sec, "REVIEW", "agent instructions / memory / sessions would be pushed: read them for "
                 "personal workflow, machine names and private notes", agent_now)
@@ -482,7 +487,7 @@ def main():
             print("publish-check: scanning history for personal details…", file=sys.stderr)
             check_history_text(repo, files, pats, globs, allows, rep)
         check_authors(repo, personal, allows, rep)
-        check_files(repo, tree if bare else repo, files, personal, a.max_mb, rep)
+        check_files(repo, tree if bare else repo, files, personal, a.max_mb, rep, reviewed=globs)
         if not bare:
             check_github(repo, rep)
     finally:
