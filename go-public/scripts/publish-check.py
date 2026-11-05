@@ -449,8 +449,9 @@ def check_github(repo: Path, rep: Report, sec="GitHub"):
                    env={**os.environ, "GIT_TERMINAL_PROMPT": "0"})
             if w.returncode == 0 and w.stdout.strip():
                 rows.append("a wiki with pages")
-            elif w.returncode != 0 and "not found" not in (w.stderr or "").lower():  # no pages = "not found"
-                failed.append(f"wiki: {(w.stderr or '').strip()[:120] or f'exit {w.returncode}'}")
+            elif w.returncode != 0:  # "not found" means no pages OR no access: GitHub won't say which
+                failed.append(f"wiki: {(w.stderr or '').strip()[:120] or f'exit {w.returncode}'} "
+                              "(an empty wiki says this too; if unused: gh repo edit --enable-wiki=false)")
         pg = sh(["gh", "api", f"repos/{nwo}/pages", "--jq", ".html_url"], check=False)
         if pg.returncode == 0 and pg.stdout.strip():
             rows.append(f"a Pages site ({pg.stdout.strip()})")

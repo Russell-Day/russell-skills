@@ -4,17 +4,20 @@ Three optional systemd user timers keep T3's sidebar and memory tidy when
 many workers run. Unit files are in `../systemd/`. Each script takes
 `--dry-run`.
 
-Install the ones you want (drop names from the list). The `sed` puts your own
-node's directory first on the units' `PATH`, so a node from nvm, fnm or
-Homebrew is found too:
+Install the ones you want (drop names from `units`). The `sed` puts your own
+node's directory first on each unit's `PATH`, so a node from nvm, fnm or
+Homebrew is found too; the script stops at the first error:
 
 ```bash
-cd ~/.agents/skills/subagents/systemd && n=$(dirname "$(command -v node)")
-for u in prune-workers settle-workers reap-sessions; do
-  sed "s#^Environment=\"PATH=#&$n:#" $u.service > ~/.config/systemd/user/$u.service
-  cp $u.timer ~/.config/systemd/user/
+bash -euc '
+units="prune-workers settle-workers reap-sessions"
+command -v node >/dev/null; n=$(dirname "$(command -v node)")
+d=~/.config/systemd/user; mkdir -p "$d"; cd ~/.agents/skills/subagents/systemd
+for u in $units; do
+  sed "s#^Environment=\"PATH=#&$n:#" $u.service > "$d/$u.service"; cp $u.timer "$d/"
 done
-systemctl --user daemon-reload && systemctl --user enable --now prune-workers.timer settle-workers.timer reap-sessions.timer
+systemctl --user daemon-reload
+for u in $units; do systemctl --user enable --now $u.timer; done'
 ```
 
 **Old worker threads are archived.** `prune-workers.timer` runs
