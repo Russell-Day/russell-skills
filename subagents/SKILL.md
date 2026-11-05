@@ -83,8 +83,8 @@ Codex on the account named by `codex.default`. **Auto-pick** is opt-in: with
   another model.
 
 **When a pool is out.** Both launchers read the cached AGY state
-(`~/.local/state/agent-stats/agy_state.json`, written by the hourly usage probe
-and by any AGY quota error). While a Gemini window is at 100%, `gemini-flash`
+(`~/.local/state/agent-stats/agy_state.json`, written by `code/agy-state.mjs` on
+any AGY quota error, and by a usage probe if you run one). While a Gemini window is at 100%, `gemini-flash`
 runs on Haiku high automatically (`EFFORT` still wins); missing or stale state
 (over 2 h) tries Gemini first. The switch is logged in the job's `run.log` and
 `limits.log`, and the first one per reset posts a `limits` notice to the
@@ -218,7 +218,7 @@ thread:
 
 ```bash
 # one Bash call each, run_in_background: true (no trailing &), so its exit wakes you;
-# then (Claude leads) t3_background_wait with the task ids so T3 shows you as Waiting
+# then (Claude leads) t3_background_wait (a T3 MCP tool) with the task ids so T3 shows you as Waiting
 JOB=plan<N>-<stage>-review node $S/t3-thread.mjs terra61 /tmp/stage-x.md
 # REVISE -> fix -> recheck on the same reviewer thread:
 ATTACH=$(cat ~/.local/state/agent-jobs/plan<N>-<stage>-review/thread_id) CONTINUE=1 \

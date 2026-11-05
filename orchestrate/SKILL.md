@@ -103,7 +103,7 @@ reference:
 
 ```bash
 # one Bash call each, run_in_background: true (no trailing &), so its exit wakes you;
-# then (Claude leads) t3_background_wait with the task ids so T3 shows you as Waiting
+# then (Claude leads) t3_background_wait (a T3 MCP tool) with the task ids so T3 shows you as Waiting
 JOB=<prefix><stage>-impl EFFORT=<effort> TIMEOUT=90m \
   node $S/t3-thread.mjs <model> /tmp/<plan>/<stage>.md
 ```

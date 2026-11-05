@@ -10,6 +10,7 @@ more than 5 days ago, with no activity since, is archived, so the sidebar keeps 
 orchestrators. Archived threads keep their transcripts (unarchive in T3), and job
 reports stay in the job directory. `--dry-run` lists them, `--days N` changes the
 age, and `--delete` deletes instead. Main threads are never touched.
+Install: `cp ~/.agents/skills/subagents/systemd/prune-workers.{service,timer} ~/.config/systemd/user/ && systemctl --user daemon-reload && systemctl --user enable --now prune-workers.timer`.
 `--settle [--min N]` settles finished delegate_task children (and the
 provider subagent threads under them) once they've been stopped for N min,
 and `[<model>] <job>` worker threads that a late report from their own helper
