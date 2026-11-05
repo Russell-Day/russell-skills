@@ -13,8 +13,8 @@ or flips visibility without the user's explicit yes.
 ## 1. Run the check
 
 ```bash
-python3 <skill>/scripts/publish-check.py <repo>          # report + exit 1 on any BLOCK
-python3 <skill>/scripts/publish-check.py <repo> --json /tmp/pc.json
+python3 scripts/publish-check.py <repo>          # report + exit 1 on any BLOCK
+python3 scripts/publish-check.py <repo> --json /tmp/pc.json
 ```
 
 Small repos take seconds. A repo with thousands of commits and big data diffs can take
@@ -55,7 +55,7 @@ hits go in `.publish-check-ignore` at the repo root, so the next run is quiet:
 
 ```
 path:docs/examples/*          # skip these paths in the personal/email scans
-allow:Russell Day             # a match containing this literal is fine
+allow:Your Name               # a match containing this literal is fine
 ```
 
 Never allowlist a gitleaks secret this way. If one is a false positive, add its
@@ -155,7 +155,7 @@ git filter-repo --strip-blobs-bigger-than 10M
 # public commit identity (noreply: gh api user --jq '"\(.id)+\(.login)@users.noreply.github.com"')
 printf '%s\n' 'Name <ID+login@users.noreply.github.com> <old@email>' > /tmp/mailmap
 git filter-repo --mailmap /tmp/mailmap
-python3 <skill>/scripts/publish-check.py /tmp/rewrite.git   # must say GO before anything is pushed
+python3 scripts/publish-check.py /tmp/rewrite.git   # must say GO before anything is pushed
 ```
 
 Every commit SHA changes, so every other clone (other machines, worktrees, CI caches)
@@ -208,4 +208,4 @@ JSON
 Add required reviews only once other people send pull requests.
 
 Finally rerun `publish-check.py`: on a public repo it also confirms secret scanning and
-push protection are on. Then continue with the launch modules in SKILL.md.
+push protection are on. Then set up the watcher and automation (phase 6, `maintain.md`).

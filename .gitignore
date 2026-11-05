@@ -5,4 +5,6 @@ __pycache__/
 *.db
 *.db-*
 .DS_Store
-library/oss-launch/personal.local.txt
+go-public/personal.local.txt
+go-public/local.md
+go-public/coupling.local.txt

@@ -1,0 +1,23 @@
+# coupling-report terms. Copy to coupling.local.txt (git-ignored) and fill in.
+# One term per line: `kind: term`, `kind: re:<regex>`, or a bare term (kind "personal").
+# Kinds are yours to name; each becomes a column. Matches are case-insensitive and
+# whole-word. List the things only you have, so the report shows where the code
+# leans on them.
+
+# your own tools and services
+tools: my-assistant
+tools: notify_me.py
+
+# the one front end / harness the code assumes
+harness: my-agent-ui
+
+# your model lineup and account pools
+models: my-fast-model
+models: re:\bteam-plan-\d\b
+
+# machines and folders
+machine: desktop-gpu
+machine: OneDrive
+
+# people (instructions that say "Alex prefers ...")
+people: Alex

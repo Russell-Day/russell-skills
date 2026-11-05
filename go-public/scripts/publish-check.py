@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""publish-check.py: can this repo go public as it is? (added to oss-launch)
+"""publish-check.py: can this repo go public as it is? (part of go-public)
 
 Checks what a public repo actually exposes: every commit on every branch and tag,
 commit messages and author emails, the files that would be pushed now, and the
@@ -18,7 +18,7 @@ changes nothing in the repo (a scratch copy of the files goes to a temp dir).
 
 Personal list: literal strings, one per line (`re:` prefix for a regex, `#` for
 comments). Default: `personal.local.txt` next to this skill (git-ignored), or
-$OSS_LAUNCH_PERSONAL. See `personal.example.txt`.
+$GO_PUBLIC_PERSONAL. See `personal.example.txt`.
 
 Repo allowlist `.publish-check-ignore` (optional, at the repo root):
   path:<glob>      skip matching paths in the personal/email scans
@@ -452,7 +452,7 @@ def main():
     bare = sh(["git", "-C", a.repo, "rev-parse", "--is-bare-repository"]).stdout.strip() == "true"
     repo = Path(a.repo).resolve() if bare else Path(sh(["git", "-C", a.repo, "rev-parse", "--show-toplevel"]).stdout.strip())
     rep = Report()
-    personal_file = Path(a.personal or os.environ.get("OSS_LAUNCH_PERSONAL") or SKILL_DIR / "personal.local.txt")
+    personal_file = Path(a.personal or os.environ.get("GO_PUBLIC_PERSONAL") or SKILL_DIR / "personal.local.txt")
     personal = load_personal(personal_file)
     if not personal:
         rep.add("Personal info", "REVIEW", f"no personal list at {personal_file}: only generic patterns ran",

@@ -73,6 +73,15 @@ gh repo view --json visibility,nameWithOwner 2>/dev/null   # public/private + sl
 No remote yet => ask for the intended `owner/repo`, or leave badge placeholders.
 
 ## Secret + brand-leak scan (every run)
-Run `python3 scripts/publish-check.py <repo>` (see `publish-check.md`). It replaces the
-old quick greps: those only saw today's files, skipped `.md`, and missed history,
-commit messages, author emails and the user's personal details.
+Run before generating and again before any public push. Flag, do not auto-fix:
+```bash
+# tracked files only; never read .git internals
+git -C <repo> ls-files | grep -E '(^|/)\.env($|\.)' || true
+grep -rInE '(api[_-]?key|secret|token|password|bearer)\s*[:=]' <repo> \
+  --include='*.*' -l 2>/dev/null | grep -vE '\.(lock|md)$' || true
+# personal / machine-specific absolute paths
+grep -rIn -E '([A-Za-z]:\\\\Users\\\\|/home/[a-z]+/|/Users/[a-z]+/)' <repo> \
+  --include='*.*' 2>/dev/null | head || true
+```
+Also eyeball for: internal hostnames, private repo names, client names, and any
+"do not ship" notes. If the repo is going public, a single leaked credential is a stop.
