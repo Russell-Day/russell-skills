@@ -1,0 +1,43 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: ShellCheck scripts
+        run: |
+          sudo apt-get update && sudo apt-get install -y shellcheck
+          mapfile -t FILES < <(git ls-files 'scripts/*.sh' 'tests/*.sh' 'demo/*.sh')
+          shellcheck "${FILES[@]}"
+      - name: Validate template placeholders are intact
+        run: |
+          # LICENSE templates must keep their copyright placeholders
+          grep -q "{{YEAR}}" templates/LICENSE-apache.txt
+          grep -q "{{YEAR}}" templates/LICENSE-mit.txt
+          echo "Template sanity check passed."
+      - name: Check for undocumented or leaked placeholders
+        run: bash scripts/check-placeholders.sh
+      - name: Check action versions in prose match the real pins
+        run: bash scripts/check-doc-action-refs.sh
+      - name: ActionLint generated workflow templates
+        run: |
+          bash <(curl -sSf https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
+          ./actionlint templates/.github/workflows/*.yml .github/workflows/*.yml
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Run audit.sh scoring assertions
+        run: bash tests/run.sh
+      # dist/ is gitignored, so nothing else proves build-agent-dirs.sh still produces
+      # self-contained bundles. This rebuilds it and relocates one to check.
+      - name: Rebuild and verify the agent bundles
+        run: bash tests/verify-bundles.sh

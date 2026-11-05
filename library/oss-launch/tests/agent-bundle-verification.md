@@ -1,0 +1,160 @@
+# Agent bundle verification
+
+What has actually been checked about the bundles `scripts/build-agent-dirs.sh` emits into
+`dist/`, and what has not. Tracked by #59 (replaces #15, split by real blocker: Cursor is
+architectural, Codex CLI/Gemini CLI is a credentials gap).
+
+The distinction this file exists to keep honest:
+
+- **Format-verified**: the bundle matches the harness's documented extension format, and
+  its payload is self-contained and runnable. Checked mechanically, re-checkable by anyone.
+- **Live-trigger-tested**: a real install of that harness was given a real prompt, and the
+  agent was observed pulling in the bundle and following `SKILL.md`. Requires the harness.
+
+Format-verified is not a weaker version of live-trigger-tested. It cannot catch a harness
+that silently ignores a rule file, changes its discovery path, or truncates a long
+`description`. Those are exactly the failures #59 exists to find.
+
+**Last run: 2026-09-03**, on Windows 11 / Git Bash.
+
+Format verification is no longer a manual pass: `tests/verify-bundles.sh` rebuilds `dist/`
+and asserts payload completeness, manifest shape, and self-containment (a bundle is
+relocated out of `dist/` and its scripts are run from there against a scratch repo). CI
+runs it on every push, closing #45. What remains manual is live-trigger-testing, which
+needs the harness itself.
+
+## Status
+
+| Harness | Installed here | Format-verified | Payload runs | Live-trigger-tested |
+|---------|----------------|-----------------|--------------|---------------------|
+| Claude Code | yes (v2.1.215) | yes (CI) | yes (CI) | **yes** (dogfooded daily) |
+| Cursor | yes (v2.2.43) | yes (CI) | yes (CI) | **not planned** (see below) |
+| Codex CLI | yes (v0.151.0, installed 2026-08-31) | yes (CI) | yes (CI) | **no**, credentials (see below) |
+| Gemini CLI | yes (v0.57.0, installed 2026-08-31) | yes (CI) | yes (CI) | **no**, credentials (see below) |
+| Windsurf | no | yes (CI) | yes (CI) | **no**, harness not installed here |
+| Aider | no | yes (CI) | yes (CI) | **no**, harness not installed here |
+
+Windsurf and Aider were added 2026-09-03 (#46). `AGENTS.md` had named both as supported
+via the generic shell path while `build-agent-dirs.sh` emitted no bundle for either.
+Windsurf reuses the Cursor rule emitter (same frontmatter-plus-body shape,
+`trigger: model_decision` in place of `alwaysApply: false`). Aider is structurally
+different and is documented as such: it has no rules directory and no trigger matching, so
+the skill ships as an always-on `CONVENTIONS.md` that states its own trigger conditions.
+
+## Why Cursor is not planned for live-trigger-testing (#59, Part A)
+
+Cursor 2.2.43 is installed at `C:\Program Files\cursor`, and its CLI is on `PATH`. That CLI
+is a VS Code-style **editor launcher**, not an agent runner:
+
+```
+$ cursor --help
+Cursor 2.2.43
+Usage: cursor.exe [options][paths...]
+  -d --diff / -m --merge / -a --add / -g --goto / -n --new-window / -w --wait ...
+```
+
+Every option opens, compares, or focuses a window. There is no headless or agent
+subcommand, and no separate `cursor-agent` binary on this machine.
+
+Triggering the rule means typing a prompt into the chat pane of a running GUI and reading
+what the agent does with it. That cannot be driven or observed from a shell session, so
+**installation did not translate into testability**. Recording it as tested would be a lie
+that removes the only signal #59 is trying to produce.
+
+This is a finding in itself: "is the harness installed" is the wrong gate for this issue.
+The right one is "can the harness be driven non-interactively". Only Claude Code and the
+two CLI-based harnesses can be.
+
+**Decision, 2026-09-03:** Cursor is no longer tracked as a live-trigger-testable target.
+It is documented as format-verified, chat-pane only, in `AGENTS.md` and the README. This
+is the scope call #59 Part A asked for, taken rather than left open: repeating the install
+attempt produces the same result, so leaving it queued only made the issue look
+actionable. If Cursor ships a shell-drivable agent mode, reopen it then.
+
+## Why Codex CLI and Gemini CLI are still untested despite being installed, 2026-08-31
+
+Both `@openai/codex` and `@google/gemini-cli` installed cleanly (`npm install -g`) and both
+CLIs are genuinely non-interactive-capable, unlike Cursor - this is not the same gap. The
+actual blocker: neither has an active account behind it on this machine. No
+`OPENAI_API_KEY`/`GEMINI_API_KEY`/`GOOGLE_API_KEY` in the environment, no prior OAuth session
+for either tool (`~/.codex`, `~/.gemini` both empty install scaffolding, no credentials), and
+no Anthropic-account-holder subscription to either service to authenticate with.
+
+This is a **credentials gap, not a capability gap** - worth keeping distinct from Cursor's
+architectural one in any future pass on this issue. Closing it needs someone with an active
+OpenAI (Codex CLI) and/or Google AI (Gemini CLI) account to run the actual trigger-test; it
+isn't something this session can complete by installing more software.
+
+## What was verified, 2026-08-14
+
+Run against all four bundles after `bash scripts/build-agent-dirs.sh`.
+
+### 1. Every path `SKILL.md` names resolves inside its own bundle
+
+Each bundle's `SKILL.md` references `references/*.md`, `templates/...`, and `scripts/*.sh`.
+A bundle that names a file it did not ship is broken in a way no amount of format
+correctness would catch, and the agent only discovers it mid-run.
+
+```
+.claude/skills/oss-launch      refs unresolved: 0
+.codex/skills/oss-launch       refs unresolved: 0
+.cursor/oss-launch             refs unresolved: 0
+.gemini/extensions/oss-launch  refs unresolved: 0
+```
+
+### 2. The bundled scripts run from the bundle location
+
+`audit.sh` resolves its own root, so it must work from inside a bundle without a separate
+clone. Confirmed for all four.
+
+### 3. End-to-end scaffold from a placed Cursor bundle
+
+`dist/.cursor/` copied into a scratch repo as a user would, then run from where it landed:
+
+```
+$ bash .cursor/oss-launch/scripts/apply.sh . --config cfg
+── apply.sh summary (stack: node) ──
+Created (16): LICENSE CONTRIBUTING.md … .github/workflows/stale.yml
+Score: 13/16 (81%)
+```
+
+This proves the payload is genuinely self-contained: correct stack detection, all 16 files
+written, audit re-run, no reference back to the original clone. It does **not** prove
+Cursor ever reads `.cursor/rules/oss-launch.mdc`.
+
+### 4. Manifest shape
+
+All of the below are now asserted by `tests/verify-bundles.sh` rather than eyeballed.
+
+- `.cursor/rules/oss-launch.mdc`: `description` + `alwaysApply: false` frontmatter, body
+  pointing at `.cursor/oss-launch/SKILL.md`. The `description` is emitted from `SKILL.md`'s
+  frontmatter at build time and asserted equal to it, closing the drift #47 found.
+- `.windsurf/rules/oss-launch.md`: `trigger: model_decision` + the same derived
+  `description`, body pointing at `.windsurf/oss-launch/SKILL.md`.
+- `.gemini/extensions/oss-launch/gemini-extension.json`: `name`, `version` (derived from
+  the CHANGELOG, not hardcoded, per #27), `description` (derived from `SKILL.md`, per #48,
+  so `gemini extensions list` shows a labelled entry), `contextFileName: GEMINI.md`,
+  alongside `commands/oss-launch.toml`. Asserted to be valid JSON.
+- `.codex/skills/oss-launch/SKILL.md`: same format as Claude Code, no adaptation.
+- `.aider-bundle/`: `CONVENTIONS.md` carrying the skill body, and `.aider.conf.yml` whose
+  `read:` list names it.
+
+Because the descriptions are generated, a `": "` in `SKILL.md`'s description would break
+the YAML plain scalar in the Cursor and Windsurf rule files. `build-agent-dirs.sh` fails
+the build on that rather than emitting a file the harness would misparse.
+
+## What would close the CLI half of this
+
+For Codex CLI and Gemini CLI, once an authenticated account is available:
+
+0. Log into the CLI (`codex` / `gemini`, interactive, one-time).
+1. Copy the bundle into a scratch repo.
+2. Prompt the agent with something in the trigger set, e.g. "open source this repo".
+3. Confirm it pulls in the bundle **without being told the file path**, which is the whole
+   claim being tested.
+4. Confirm it follows `SKILL.md`'s order: scan, report a gap table, ask, then generate.
+5. Record the harness version, the prompt, and where it deviated.
+
+Step 3 is the one that matters. A harness that only works when you paste the path is a
+documentation path, not a skill integration, and `AGENTS.md` already documents that
+fallback for every harness.
