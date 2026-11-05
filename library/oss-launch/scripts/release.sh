@@ -1,0 +1,221 @@
+#!/usr/bin/env bash
+# OSS Release Script: semver bump + CHANGELOG + tag + GH release
+# Usage:
+#   bash release.sh patch      # 1.0.0 → 1.0.1
+#   bash release.sh minor      # 1.0.0 → 1.1.0
+#   bash release.sh major      # 1.0.0 → 2.0.0
+#   bash release.sh 1.3.0      # explicit version
+
+set -euo pipefail
+
+VERSION_ARG="${1:-}"
+if [ -z "$VERSION_ARG" ]; then
+  echo "Usage: bash release.sh <patch|minor|major|x.y.z>"
+  exit 1
+fi
+
+if ! git diff --quiet || ! git diff --cached --quiet; then
+  echo "Error: working tree has uncommitted changes. Commit or stash first."
+  exit 1
+fi
+
+detect_type() {
+  if [ -f "package.json" ]; then echo "npm"
+  elif [ -f "pyproject.toml" ]; then echo "python"
+  elif [ -f "Cargo.toml" ]; then echo "rust"
+  else echo "none"
+  fi
+}
+PROJECT_TYPE=$(detect_type)
+
+get_current_version() {
+  case "$PROJECT_TYPE" in
+    npm)    node -p "require('./package.json').version" 2>/dev/null || echo "0.0.0" ;;
+    python) grep '^version' pyproject.toml | head -1 | sed 's/.*= *"\(.*\)"/\1/' ;;
+    rust)   grep '^version' Cargo.toml | head -1 | sed 's/.*= *"\(.*\)"/\1/' ;;
+    # No manifest: the CHANGELOG's newest released heading is the reliable source.
+    # `git describe` only walks tags reachable from HEAD, so a tag stranded by a
+    # history rewrite (force-push, rebase, filtered branch) is skipped silently and
+    # the next release regresses to an older version line.
+    none)
+      local from_changelog=""
+      if [ -f "CHANGELOG.md" ]; then
+        from_changelog="$(grep -m1 -oE '^## \[[0-9]+\.[0-9]+\.[0-9]+\]' CHANGELOG.md 2>/dev/null | tr -d '#[] ')"
+      fi
+      if [ -n "$from_changelog" ]; then
+        echo "$from_changelog"
+      else
+        git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//' || echo "0.0.0"
+      fi
+      ;;
+  esac
+}
+
+CURRENT=$(get_current_version)
+echo "Current version: $CURRENT"
+
+semver_bump() {
+  local version="$1" bump="$2"
+  local major minor patch
+  IFS='.' read -r major minor patch <<< "$version"
+  case "$bump" in
+    major) echo "$((major + 1)).0.0" ;;
+    minor) echo "$major.$((minor + 1)).0" ;;
+    patch) echo "$major.$minor.$((patch + 1))" ;;
+    *)     echo "$bump" ;;
+  esac
+}
+
+NEW_VERSION=$(semver_bump "$CURRENT" "$VERSION_ARG")
+echo "New version:     $NEW_VERSION"
+echo ""
+read -r -p "Proceed with release v$NEW_VERSION? [y/N] " CONFIRM
+if [[ ! "$CONFIRM" =~ ^[Yy]$ ]]; then
+  echo "Aborted."
+  exit 0
+fi
+
+case "$PROJECT_TYPE" in
+  npm)
+    npm version "$NEW_VERSION" --no-git-tag-version
+    echo "✓ Bumped package.json to $NEW_VERSION"
+    ;;
+  python)
+    sed -i.bak "s/^version = \"$CURRENT\"/version = \"$NEW_VERSION\"/" pyproject.toml
+    rm -f pyproject.toml.bak
+    echo "✓ Bumped pyproject.toml to $NEW_VERSION"
+    ;;
+  none)
+    echo "ℹ No manifest found: tag-only mode"
+    ;;
+esac
+
+TODAY=$(date +%Y-%m-%d)
+if [ -f "CHANGELOG.md" ]; then
+  sed -i.bak \
+    "s/## \[Unreleased\]/## [Unreleased]\n\n### Added\n\n### Changed\n\n### Deprecated\n\n### Removed\n\n### Fixed\n\n### Security\n\n---\n\n## [$NEW_VERSION] - $TODAY/" \
+    CHANGELOG.md
+  rm -f CHANGELOG.md.bak
+
+  # The sed above rolls whatever sat under [Unreleased] down into the new released
+  # section, and installs a fresh set of empty categories under [Unreleased]. When
+  # nothing was logged as you went (the common case), what rolls down is six bare "###"
+  # headings with no content under any of them, which is what the release then ships.
+  # Prune the empty ones out of the released section only: [Unreleased] is supposed to
+  # carry empty categories, as the menu of where to file the next entry.
+  awk -v version="$NEW_VERSION" '
+    BEGIN { in_release = 0; held = ""; has_held = 0 }
+
+    # A "### Category" heading is held rather than printed until something real appears
+    # under it. keep() emits it; drop() throws it away because nothing followed.
+    function keep() { if (has_held) { print held; has_held = 0; held = "" } }
+    function drop() { has_held = 0; held = "" }
+
+    {
+      # Section boundaries: another version heading, or the horizontal rule between
+      # sections. A category still held at a boundary had no content, so it is dropped.
+      if ($0 ~ /^## \[/) {
+        drop()
+        in_release = (index($0, "## [" version "]") == 1)
+        print
+        next
+      }
+      if (in_release && $0 ~ /^---[[:space:]]*$/) {
+        drop()
+        print
+        next
+      }
+
+      if (!in_release) { print; next }
+
+      if ($0 ~ /^### /) {
+        # Replacing a still-held heading drops it: it had nothing under it either.
+        drop()
+        held = $0
+        has_held = 1
+        next
+      }
+
+      # Blank lines under a held heading are held with it, so pruning a category does
+      # not leave its spacing behind. keep() re-emits one when the category survives.
+      if ($0 ~ /^[[:space:]]*$/) {
+        if (has_held) next
+        print
+        next
+      }
+
+      keep()
+      print
+    }
+
+    END { drop() }
+  ' CHANGELOG.md > CHANGELOG.md.pruned && mv CHANGELOG.md.pruned CHANGELOG.md
+
+  # Keep a Changelog expects a [x.y.z]: <url> link reference per released heading.
+  # The heading alone renders as unresolved link text on GitHub without one.
+  REMOTE_URL="$(git remote get-url origin 2>/dev/null || true)"
+  if [ -n "$REMOTE_URL" ]; then
+    REPO_SLUG="$(printf '%s' "$REMOTE_URL" \
+      | sed -E 's#^git@([^:]+):#https://\1/#; s#\.git$##' \
+      | sed -E 's#^https://[^/]+/##')"
+    if grep -qx "\[$NEW_VERSION\]:.*" CHANGELOG.md; then
+      : # link ref already present (e.g. re-run after a manual edit)
+    else
+      printf '\n[%s]: https://github.com/%s/releases/tag/v%s' \
+        "$NEW_VERSION" "$REPO_SLUG" "$NEW_VERSION" >> CHANGELOG.md
+    fi
+  fi
+
+  echo "✓ Updated CHANGELOG.md"
+  echo ""
+  git diff CHANGELOG.md | head -30
+  echo ""
+  read -r -p "CHANGELOG looks correct? [y/N] " CHANGELOG_OK
+  if [[ ! "$CHANGELOG_OK" =~ ^[Yy]$ ]]; then
+    echo "Edit CHANGELOG.md, then re-run."
+    exit 0
+  fi
+fi
+
+git add -A
+git commit -m "chore: release v$NEW_VERSION"
+echo "✓ Release commit created"
+
+git tag -a "v$NEW_VERSION" -m "Release v$NEW_VERSION"
+git push origin HEAD
+git push origin "v$NEW_VERSION"
+echo "✓ Tag v$NEW_VERSION pushed"
+
+if command -v gh &>/dev/null; then
+  read -r -p "Create GitHub Release for v$NEW_VERSION? [y/N] " GH_RELEASE
+  if [[ "$GH_RELEASE" =~ ^[Yy]$ ]]; then
+    RELEASE_NOTES=$(awk "/## \[$NEW_VERSION\]/{flag=1; next} /^## \[/{flag=0} flag" CHANGELOG.md)
+    if [ -n "$RELEASE_NOTES" ]; then
+      gh release create "v$NEW_VERSION" --title "v$NEW_VERSION" --notes "$RELEASE_NOTES"
+    else
+      gh release create "v$NEW_VERSION" --title "v$NEW_VERSION" --generate-notes
+    fi
+    echo "✓ GitHub Release created"
+  fi
+fi
+
+if [ "$PROJECT_TYPE" = "npm" ]; then
+  read -r -p "Publish to npm? [y/N] " NPM_PUBLISH
+  if [[ "$NPM_PUBLISH" =~ ^[Yy]$ ]]; then
+    npm pack --dry-run
+    read -r -p "Publish now? [y/N] " NPM_CONFIRM
+    if [[ "$NPM_CONFIRM" =~ ^[Yy]$ ]]; then
+      npm publish --access public
+      echo "✓ Published to npm"
+    fi
+  fi
+fi
+
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "Release v$NEW_VERSION complete."
+echo ""
+echo "Post-release checklist:"
+echo "  [ ] Announce on Twitter/X with demo GIF"
+echo "  [ ] Post to r/SideProject or relevant subreddit"
+echo "  [ ] Update docs if API changed"

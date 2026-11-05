@@ -202,6 +202,19 @@
       "license": "MIT",
       "kind": "has-scripts",
       "status": "available"
+    },
+    {
+      "name": "oss-launch",
+      "description": "Use when taking a repo open source, or hardening one that already is.",
+      "tags": [],
+      "source": {
+        "repo": "https://github.com/AnayDhawan/oss-launch",
+        "path": null,
+        "commit": "ede486c4f0d0852d492133dbfe9622e55c08d585"
+      },
+      "license": "Apache-2.0",
+      "kind": "has-scripts",
+      "status": "available"
     }
   ]
 }

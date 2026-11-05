@@ -1,0 +1,190 @@
+# Changelog
+
+All notable changes to this project are documented here. Format based on
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project follows
+[Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+
+### Added
+- Rust and Go CI templates (`cargo fmt`/`clippy`/`build`/`test`, and
+  `gofmt`/`vet`/`build`/`test -race`). Both stacks were detected and got a real
+  `.gitignore`, but fell through to `generic-ci.yml` (#41).
+- Windsurf and Aider bundles from `build-agent-dirs.sh`. `AGENTS.md` named both as
+  supported while the build script emitted neither (#46).
+- `scripts/check-doc-action-refs.sh`: fails when an action version shown in prose
+  disagrees with what the workflows actually pin. Offline, so it runs on every PR,
+  unlike `check-action-pins.sh` (#37).
+- `tests/verify-bundles.sh`: rebuilds `dist/`, checks every bundle's payload and
+  manifest, then relocates one and runs its scripts from there. Wired into CI, so the
+  untracked `dist/` no longer depends on someone rebuilding it by hand (#45).
+- `--strict` on `check-action-pins.sh`, comparing the full version for pins that are not
+  a bare major. A precise pin does not float, so it goes stale silently (#38).
+- Hugo and Eleventy site detection, each on a corroborating marker rather than a config
+  filename alone (#53).
+- `{{DEFAULT_BRANCH}}`, resolved from the target repo rather than assumed to be `main`
+  (#52).
+- `require_all_tokens()`: every `_FILL_TOKENS` entry must have a value before any
+  template renders, so a token added to `apply.sh` but not `demo/scaffold.sh` fails
+  loudly instead of leaking a literal `{{TOKEN}}` (#44).
+
+### Changed
+- `templates/README.md` and `references/readme-anatomy.md` now default to a centered
+  header with badges and nav row, a demo GIF, a Why section, a features table with
+  per-feature sections, then Quick start, Tech stack, Folder structure, Roadmap,
+  Contributing and License. Screenshots, Environment variables, Keyboard shortcuts and
+  Privacy are optional and deleted when they do not apply. The separate Usage section is
+  gone; examples live in the feature sections. Existing READMEs are still augmented, never
+  reflowed. The license badge now uses `img.shields.io/github/license`, since
+  `license-Apache-2.0-blue` mis-parses on shields.
+- `update-readme-with-gif.sh` finds the Quick start heading in any casing.
+- `audit.sh`'s CI check reads the `run:` steps out of each workflow and looks for a real
+  build, test, or lint step. A repo whose only workflow was `labeler.yml` or `stale.yml`
+  used to score the point on the filename alone (#49).
+- `audit.sh`'s Optional section is grouped, and the site-file block is printed only when
+  a site framework is detected, the same detector `apply.sh` uses (#51).
+- Java's install/dev/verify/test commands resolve Maven vs Gradle from the repo instead
+  of emitting a `mvn ... || ./gradlew ...` shell fallback chain into CONTRIBUTING.md
+  prose (#40).
+- npm vs yarn workspace detection reads `packageManager` first, then the newer lockfile.
+  A repo that migrated to npm and left a `yarn.lock` behind was reported as yarn (#39).
+- The Cursor rule's `description` and `gemini-extension.json`'s new `description` are
+  emitted from `SKILL.md`'s frontmatter rather than hand-copied (#47, #48).
+- Cursor is documented as format-verified, chat-pane only, and is no longer tracked as a
+  live-trigger-testable target: its CLI has no headless mode to drive (#59, Part A).
+- `actions/setup-java` bumped `v5` -> `v6` in the java, kotlin, and scala CI templates
+  (#60).
+
+### Fixed
+- `release.sh` prunes empty `###` category headings out of the section it just released.
+  A cycle where nothing was logged as you went shipped six bare headings (#36).
+- `tests/run.sh` parses audit.sh's denominator instead of hardcoding `/16` in three
+  places, where adding a scored check produced a confusing `got /16` on every fixture
+  (#35).
+- `references/ci-cd.md`'s worked example showed `actions/setup-node@v4` against a real
+  pin of `v7` (#37).
+
+## [1.1.0] - 2026-08-31
+
+### Added
+- Site scaffolding: `llms.txt` (always, per [llmstxt.org](https://llmstxt.org/)) plus
+  `404.html`, `robots.txt` and `sitemap.xml` written only when
+  `scripts/lib/detect-site.sh` finds a static-site or docs framework. New `{{SITE_URL}}`
+  token, defaulting to the GitHub Pages project URL.
+- Kotlin and Scala stack detection, with `.gitignore` and CI templates for both. Kotlin
+  is recognised on positive evidence only, so plain Gradle-Java still resolves to `java` (#16).
+- `detect_monorepo()` and `detect_docker()`: a second detection axis, since a repo can be
+  one primary language and simultaneously a workspace and/or containerised (#16).
+- Four opt-in CI templates behind `WANT_COVERAGE`, `WANT_RELEASE_PLEASE` and
+  `WANT_CONTAINER_BUILD`: Codecov upload for Node and Python, release-please as an
+  alternative to `scripts/release.sh`, and a GHCR container build (#17).
+- Label and triage automation in the scaffold payload: `labeler.yml` path rules, the
+  labeler workflow, and a deliberately conservative `stale.yml` that never auto-closes
+  pull requests (#18).
+- `scripts/setup-labels.sh --good-first-issue-seed`: prints a seeding checklist rather
+  than fabricating issues (#18).
+- `scripts/check-action-pins.sh` and a monthly workflow watching the action pins inside
+  `templates/.github/workflows/`, which dependabot cannot see (#28).
+- `tests/fixtures/` and a detection test suite in `tests/run.sh`, plus assertions that
+  every stack's `.gitignore` and CI lookup resolves to a file that exists (#16).
+- `tests/agent-bundle-verification.md`: what is format-verified versus live-trigger-tested
+  per harness, and why the distinction matters (#15).
+
+### Changed
+- All four `setup-*` action pins in the CI templates were stale and are now current;
+  July's fix bumped only `actions/checkout` (#28).
+- `templates/CHANGELOG.md` and `release.sh` emit all six Keep a Changelog categories in
+  canonical order, not four (#25).
+- README, `SKILL.md` and `AGENTS.md` state the bash/Git Bash prerequisite (#29) and a more
+  specific per-harness verification status (#15).
+
+---
+
+## [1.0.1] - 2026-07-31
+
+### Added
+- README: Contributing & security section linking CONTRIBUTING.md, CODE_OF_CONDUCT.md,
+  and SECURITY.md, plus stars/last-commit badges and a roadmap pointer.
+- `.editorconfig` (dogfooding the repo's own template; was flagged optional by its own
+  `audit.sh`).
+
+### Fixed
+- LICENSE: removed a copy-pasted note referencing a different repo's UI-component
+  sourcing (Components) that had no relevance here and broke GitHub's license
+  auto-detector (was showing "Other" instead of Apache-2.0).
+- SKILL.md: added an explicit Limitations section (license templates supported, README
+  generation is agent-only, never publishes on its own, stack coverage).
+- `scripts/generate-media.sh` used `-c:v libpal`, not a real ffmpeg encoder, instead of
+  the standard two-pass palettegen/paletteuse workflow.
+- `templates/README.md` hardcoded an MIT badge and footer regardless of the chosen
+  license; every other license reference uses `{{LICENSE}}`.
+- `scripts/audit.sh` scored a nonexistent `REPO_PATH` as 0/16 instead of erroring, so a
+  typo'd path looked like a catastrophically bare repo (#26).
+- `scripts/apply.sh` skipped `pyproject.toml` when auto-detecting a version, silently
+  discarding the declared version of every Python repo scaffolded headlessly (#24).
+- `scripts/build-agent-dirs.sh` hardcoded the Gemini extension version as `1.0.0`; it is
+  now derived from the CHANGELOG, falling back to the nearest tag (#27).
+- `templates/CONTRIBUTING.md` linked to `.md` issue templates, but the generated files
+  are `.yml`, so every scaffolded repo shipped two dead links (#20).
+- The 8 generated CI templates pinned `actions/checkout@v4` while this repo's own
+  workflows were already on v7, handing every scaffolded repo a stale-action PR (#21).
+- `scripts/release.sh` derived the current version of a manifest-less repo from
+  `git describe`, which only walks tags reachable from HEAD. A tag stranded by a history
+  rewrite was skipped silently and the next release regressed to an older version line
+  (this repo hit exactly that: a `patch` bump off `v1.0.0` produced `v0.4.1`). It now
+  reads the CHANGELOG's newest released heading, falling back to `git describe`.
+
+### Changed
+- `SKILL.md`'s scan step now lists all 9 supported stack markers; `Gemfile`,
+  `pom.xml`/`build.gradle` and `Package.swift` were missing (#22).
+- `AGENTS.md` and the README now state per-harness verification status: Claude Code is
+  dogfooded, while the Codex CLI, Cursor and Gemini CLI bundles are built to each
+  platform's documented format but not live-trigger-tested (#15).
+- README demo refreshed to the current workflow clip, with the source mp4 alongside it.
+
+## [1.0.0] - 2026-07-08
+
+Stable release. Scans a repo, generates a tailored open-source file collection, runs
+headless or agent-driven, and works across four agent harnesses.
+
+> **Note on the `v1.0.0` git tag (#30).** The tag is orphaned. It points at commit
+> `c3940fe`, which the July 17 history rewrite (stripping `GROWTH.md` out of the release
+> commit and force-pushing) left off `main`. The equivalent commit now on `main` is
+> `ae46411 chore: release v1.0.0`, so `git merge-base --is-ancestor v1.0.0 HEAD` fails and
+> `git describe` skips the tag entirely. The tag is deliberately **not** force-moved:
+> re-pointing a published tag silently changes what an already-fetched `v1.0.0` resolves
+> to for anyone who cloned before the fix. Nothing reads it any more, since `release.sh`
+> derives the current version from this file rather than from `git describe` (fixed in
+> 1.0.1). **If you want a tag that is genuinely reachable from `main`, use `v1.0.1`**:
+> it is the practical equivalent of this release plus that fix.
+
+### Added
+- Headless `scripts/apply.sh`: runs scan -> generate -> re-audit from a config file, no
+  agent loop. Never overwrites an existing file; skips README.md's prose generation
+  (agent-only) rather than emitting boilerplate.
+- Stack detection + templates for PHP, .NET, Ruby, Java (Maven + Gradle), and Swift,
+  alongside the original Node/Python/Rust/Go coverage.
+- `AGENTS.md` + `scripts/build-agent-dirs.sh`: ready-to-copy skill bundles for Claude
+  Code, Codex CLI, Cursor, and Gemini CLI from a single `SKILL.md`, each verified
+  structurally against that platform's own documented format.
+- `example/`: a real before/after `/oss-launch` run (1/16 -> 16/16 audit score) instead
+  of hand-written boilerplate claims.
+- `tests/run.sh`: CI-asserted `audit.sh` scoring against empty/partial/full fixtures.
+- `scripts/check-placeholders.sh`: CI check that every template token is documented and
+  that a real generated run leaves zero unresolved `{{TOKENS}}`.
+- CI now runs actionlint against every generated CI workflow template, and shellcheck
+  passes at default (not just error) severity.
+- `.github/workflows/release.yml` for tagged releases.
+- `templates/FUNDING.yml`, `CITATION.cff`, `.editorconfig`.
+
+### Fixed
+- `references/generate.md`'s placeholder-token map had drifted ~25 tokens out of sync
+  with what `templates/` actually use, including a real naming mismatch
+  (`SECURITY_CONTACT` documented, `SECURITY_EMAIL` used). Regenerated from source, now
+  CI-enforced so it can't drift silently again.
+- Word-splitting risk in this repo's own CI and the generated `generic-ci.yml` template's
+  shellcheck invocation (caught by actionlint's embedded shellcheck integration).
+
+[1.1.0]: https://github.com/AnayDhawan/oss-launch/releases/tag/v1.1.0
+[1.0.1]: https://github.com/AnayDhawan/oss-launch/releases/tag/v1.0.1
+[1.0.0]: https://github.com/AnayDhawan/oss-launch/releases/tag/v1.0.0
