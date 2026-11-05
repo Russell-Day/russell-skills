@@ -1,0 +1,14 @@
+{
+  "_doc": "Fixed accounts for the test suites (testdata/use-test-accounts.mjs points ACCOUNTS_FILE here), so tests never depend on this machine's accounts.local.json.",
+  "claude": { "configDir": "~/.claude", "t3Instance": "claudeAgent", "t3WorkerInstance": "claudeAgent_workers" },
+  "codex": {
+    "default": "main",
+    "accounts": [
+      { "name": "spare", "home": "~/.codex_spare", "t3Instance": "codex_spare", "reserve": true },
+      { "name": "second", "home": "~/.codex_second", "t3Instance": "codex_second", "reserve": false },
+      { "name": "main", "home": "~/.codex", "t3Instance": "codex", "reserve": false }
+    ]
+  },
+  "jobRoots": [],
+  "messageBoard": { "feedback": "" }
+}

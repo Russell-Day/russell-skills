@@ -1,3 +1,4 @@
+import "./testdata/use-test-accounts.mjs"; // first: fixed test accounts
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";

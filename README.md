@@ -104,9 +104,10 @@ bash subagents/code/run.test.sh
 python3 -m pytest message-board/scripts/test_board.py
 ```
 
-The tests run against fake T3 and fake model CLIs in temp homes; they never
-call a model. `run.test.sh` needs at least two Codex accounts in
-`accounts.local.json` for its account-retry case.
+The tests run against fake T3, fake model CLIs and fixed test accounts
+(`subagents/code/testdata/accounts.test.json`) in temp homes; they never call a
+model or read your own config. The message board tests need pytest
+(`pip install pytest`, or `uvx pytest message-board/scripts/test_board.py`).
 
 ## Support
 
