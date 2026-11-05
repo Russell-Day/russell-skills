@@ -6,3 +6,10 @@ path:go-public/coupling.example.txt
 allow:/home/me/
 allow:you@school.edu
 allow:you@gmail.com
+# triaged 2026-11-05: the commit email is fine to publish; the phone number is
+# upstream's "messy realistic data" example; the fixture log is synthetic; the
+# library AGENTS.md files are the upstream skills' compiled rules
+allow:russday@umich.edu
+allow:+1 (312) 847-1928
+path:subagents/code/testdata/*
+path:library/*/AGENTS.md

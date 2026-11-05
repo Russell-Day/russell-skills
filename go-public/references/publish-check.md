@@ -54,7 +54,8 @@ Show the report grouped as it prints. For each REVIEW, decide together: intended
 hits go in `.publish-check-ignore` at the repo root, so the next run is quiet:
 
 ```
-path:docs/examples/*          # skip these paths in the personal/email scans
+path:docs/examples/*          # skip these paths in the personal/email scans; data, binary
+                              # and agent files here count as reviewed (keys still BLOCK)
 allow:Your Name               # a match containing this literal is fine
 ```
 
