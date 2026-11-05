@@ -16,8 +16,3 @@ the reserve, any account to use first, and which plans cost you money.
 **Claude T3 profiles.** Orchestrators use `claudeAgent`; workers use the same
 profile, or a second one with a smaller auto-compact window. Name the T3
 profile Haiku runs on here too, if it has its own.
-
-## dev-projects
-
-OneDrive folder (`<OneDrive>` in the dev-projects skill), e.g.
-`%USERPROFILE%\OneDrive` (WSL `/mnt/c/Users/<you>/OneDrive`).

@@ -1,6 +1,6 @@
 ---
 name: design-refs
-description: Before building a UI pattern (settings page, sidebar, chat composer, empty state...), look at 3-4 really good working examples first - the user's saved design collection (design_refs_search, if the TEDI MCP server has it), free galleries (component.gallery, shadcn blocks, 21st.dev) and screenshots of best-in-class apps at phone and desktop size - then show them side by side, say what each borrows, and build. Includes ready scripts to screenshot URLs and make the side-by-side image.
+description: Before building a UI pattern (settings page, sidebar, chat composer, empty state...), look at 3-4 really good working examples first - the user's saved design collection (a design_refs_search tool, if one is connected), free galleries (component.gallery, shadcn blocks, 21st.dev) and screenshots of best-in-class apps at phone and desktop size - then show them side by side, say what each borrows, and build. Includes ready scripts to screenshot URLs and make the side-by-side image.
 ---
 
 # Design references before you build
@@ -23,7 +23,8 @@ that matters most (phone first or desktop first) from the project's own rules.
 
 ## 2. The user's own collection first
 
-If the TEDI MCP server is connected and has a `design_refs_search` tool, call
+If an MCP server you have connected offers a `design_refs_search` tool (a
+personal assistant or bookmarks server can), call
 it with the pattern words (try a synonym too: `composer`, `chat input`):
 
 ```
@@ -117,8 +118,8 @@ from.
 ## 6. Found something really good?
 
 If a reference you found is worth keeping for next time, add it to the user's
-collection if a save route exists in your tools (a TEDI chat message such as
-"nice design <url>" saves it there). Otherwise list it under **Worth saving**
+collection if a save route exists in your tools (for example a save tool
+on the same server). Otherwise list it under **Worth saving**
 in your final report: url + one line on what is good about it, so the user can
 save it.
 

@@ -17,7 +17,7 @@ repo: workers run in the caller's git root, and job directories go to
 
 ## Pick the shape
 
-The plan's size (the pacer's `--size`) sets the shape. A worker spends ~50k
+The plan's size sets the shape. A worker spends ~50k
 tokens and several minutes getting up to speed, so hand-offs cost real quota.
 
 - **`s` (1–2 stages): one thread, always.** The owning thread writes the code
@@ -30,12 +30,13 @@ tokens and several minutes getting up to speed, so hand-offs cost real quota.
 - **`l` (6+ stages): orchestrator.** The lead plans, dispatches a worker per
   stage and reviews; it writes no stages itself.
 
-Parallel workers buy speed, not savings. **Before each Claude Opus worker read
-`node ~/.agents/skills/pacer/scripts/pacer.mjs status`:** working under its
-`Working N/cap`, start it; at or over the cap, start one at most. Haiku, Codex
-and Gemini helpers don't count; the pacer never pauses a worker. (Without the
-pacer, the rule of thumb: four Opus workers empty a Claude 5-hour session in
-about three hours.)
+Parallel workers buy speed, not savings: four Opus workers empty a Claude
+5-hour session in about three hours. **With a pacer skill installed** (one that
+paces threads against the usage window), read
+`node ~/.agents/skills/pacer/scripts/pacer.mjs status` before each Claude Opus
+worker: under its `Working N/cap`, start it; at or over the cap, start one at
+most. Haiku, Codex and Gemini helpers don't count; the pacer never pauses a
+worker.
 
 In every shape terra61 (high) reviews ("Review cadence"), code you write
 yourself as much as a worker's; only a fast lane's test-only, docs or config
@@ -50,7 +51,7 @@ several accounts.
 
 **Read `accounts.local.md` for this machine's accounts and capacity** before
 choosing a pool or starting a fan-out. It sits at the root of this skills repo
-(`~/russell-skills/accounts.local.md`, the parent of this skill's directory).
+(the parent of this skill's directory).
 The scripts read account names, config homes and T3 profiles from
 `accounts.local.json` there, or from `accounts.example.json` if it's missing.
 
@@ -283,7 +284,7 @@ marking items done), use the [orchestrate](../orchestrate/SKILL.md) skill.
 ## Dispatch
 
 Both launchers append [worker communication](code/worker-communication.md):
-Caveman full for every worker, reviewer, explorer, and helper, across all model
+a terse report style for every worker, reviewer, explorer, and helper, across all model
 families (Claude, Codex, Gemini, and future routes), with complete technical
 substance and required verdicts. Orchestrators keep their normal style.
 Code, commits, PRs, and user-facing content stay in normal language.
@@ -306,11 +307,11 @@ Give each worker:
 
 Concurrent editing workers need disjoint file ownership or isolated worktrees.
 
-**Usage limits continue on their own.** T3 0.1.0 snoozes a thread whose run
+**Usage limits continue on their own.** T3 snoozes a thread whose run
 hits a usage limit and resumes it after the reset (settings
 `autoResumeLimitedThreads` + `snoozeLimitedThreads`), leads and workers alike.
-Nothing to arm; `continuity.mjs nudge --in 30m` still sends one "continue" at
-a set time.
+(A session-continuity skill, if installed, can also send one "continue" at a
+set time: `continuity.mjs nudge --in 30m`.)
 
 **Default: T3's `delegate_task`** (MCP tool, `mcp__t3-code__delegate_task`).
 The child shows under the lead in the user's sidebar and its completion wakes
@@ -346,9 +347,8 @@ the lead, so end the turn instead of polling. Per job:
   running child, a usage-limit resume or a future snooze stays. A fix round to a
   settled child still runs and re-opens it. The lead does no worker cleanup.
 - Don't settle a lead while a child runs: a settled lead can miss the
-  report. `continuity.mjs settle` refuses then. After a pacer hand-off, a
-  report that went to the old, settled lead is relayed to the new one by the
-  pacer.
+  report (session-continuity's `settle` refuses then; with a pacer, a report
+  that went to a handed-off lead is relayed to the new one).
 
 **Fallback: a visible T3 thread** through `code/t3-thread.mjs`, when
 `delegate_task` is unavailable (no T3 MCP in the session, a headless lead) or
@@ -358,48 +358,16 @@ as `run.sh`: `EFFORT`, `ACCOUNT`, `JOB`, `TIMEOUT`, `NO_SETTLE`. It opens a
 `[<model>] <job>` thread, waits for the turn to finish, and writes
 `~/.local/state/agent-jobs/<job>/{report.md,transcript.md,thread_id,exit_code}`.
 Then it settles the thread.
-`TITLE="<fix>"` titles the thread after its fix (`[<model>] <fix>`, so workers stand apart from orchestrator threads): what the user gets, in their words, no plan or stage numbers (a leading "Plan 7 S1:" is dropped; `JOB` keeps the stage); the job dir still marks it a worker for pacer, continuity and prune.
+`TITLE="<fix>"` titles the thread after its fix (`[<model>] <fix>`, so workers stand apart from orchestrator threads): what the user gets, in their words, no plan or stage numbers (a leading "Plan 7 S1:" is dropped; `JOB` keeps the stage); the job dir still marks it a worker for the pacer, continuity and prune scripts.
 `node $S/t3-thread.mjs --rename "<title>"` renames the thread you run in (a lead retitling itself to the fixes it ships).
-`node $S/t3-thread.mjs --orchestrator "<title>" <brief-file> [--model opus] [--effort medium]` starts a MAIN thread (orchestrator profile, not pinned: snoozed while it waits in the pacer's planning line, exact title, the brief as its first message) in this T3 project and prints its id at once; the pacer treats it as triaging until it runs `ready`. Triage threads use it to start one orchestrator per group of items.
+`node $S/t3-thread.mjs --orchestrator "<title>" <brief-file> [--model opus] [--effort medium]` starts a MAIN thread (orchestrator profile, not pinned, exact title, the brief as its first message) in this T3 project and prints its id at once (with a pacer, it is snoozed in the planning line and counts as triaging until it runs `ready`). Triage threads use it to start one orchestrator per group of items.
 
-**Old worker threads are archived.** `prune-workers.timer` runs
-`code/prune-workers.mjs` daily at 04:30: every worker thread (`[<model>] <job>`, or a `TITLE` one its job dir recorded) settled
-more than 5 days ago, with no activity since, is archived, so the sidebar keeps the
-orchestrators. Archived threads keep their transcripts (unarchive in T3), and job
-reports stay in the job directory. `--dry-run` lists them, `--days N` changes the
-age, and `--delete` deletes instead. Main threads are never touched.
-`--settle [--min N]` settles finished delegate_task children (and the
-provider subagent threads under them) once they've been stopped for N min,
-and `[<model>] <job>` worker threads that a late report from their own helper
-re-opened after the job ended (once no helper of theirs still runs). T3
-never settles them itself. `settle-workers.timer` runs it with `--min 0` every
-minute, so a finished worker leaves Working at once. It keeps a
-worker whose Claude transcript shows background work with no completion notice
-yet (`kept … background work pending` in the journal), the same check the
-reaper makes, and a Codex worker whose rollout shows an open turn, tool call
-or spawned agent; other providers' live sessions are kept until T3
-releases them. Install: `cp ~/.agents/skills/subagents/systemd/settle-workers.{service,timer} ~/.config/systemd/user/ && systemctl --user daemon-reload && systemctl --user enable --now settle-workers.timer`.
-
-**Finished threads' Claude and Codex sessions are closed.** T3 keeps a thread's `claude`
-process (~250 MB plus its MCP servers) for 30 min after its last activity, and
-up to 4 h when a finished worker left background work. `reap-sessions.timer`
-runs `code/reap-sessions.mjs` every 5 min: a live Claude session whose thread
-is settled, archived, snoozed, or a `thread:delegated-task:…` child whose task
-ended, with no live or queued run and 5 min without activity, gets T3's
-`provider-session.detach`. The process exits; the thread keeps its native
-session, so its next message resumes it (`claude --resume`) with its whole
-conversation. Open threads keep T3's 30 min. A session whose Claude transcript
-shows a background Bash command or Monitor with no completion notice yet is
-kept (`kept … background work pending` in the log), since only its live process
-can deliver that notice and wake the agent. Codex threads are reaped the same
-way: a Codex account runs one shared session (one `codex app-server`)
-for all its threads, so each finished thread is detached from it on its own
-(T3 unloads just that thread; the shared process stays), judged by its own
-activity, and kept while its rollout shows an open turn, tool call or spawned
-agent. Each detach, keep or failure is a line
-in `~/.local/state/agent-stats/reap-sessions.log`, and a failure fails the
-unit. `--dry-run` lists, `--json` prints the result, `--idle-min N` changes the
-wait. Install: `cp ~/.agents/skills/subagents/systemd/reap-sessions.{service,timer} ~/.config/systemd/user/ && systemctl --user daemon-reload && systemctl --user enable --now reap-sessions.timer`.
+**Thread upkeep** (optional systemd user timers): `settle-workers.timer`
+settles finished workers every minute, `prune-workers.timer` archives worker
+threads settled over 5 days ago, and `reap-sessions.timer` closes the idle
+Claude and Codex processes of finished threads (a later message resumes them).
+What each one keeps, its flags, and the install commands:
+[references/upkeep.md](references/upkeep.md).
 
 ```bash
 S=~/.agents/skills/subagents/code
@@ -428,13 +396,14 @@ JOB=stage-y-impl node $S/t3-thread.mjs opus /tmp/stage-y.md
   holds the new id and `thread_ids_prev` the old ones, so the next `CONTINUE`
   works as before. Every run writes the count to the job's `compactions`;
   `node $S/t3-thread.mjs --compactions [threadId]` prints it (default: your own thread).
-- **Leads hand off too, automatically.** The pacer does it for any thread with
-  a pacer plan entry at 3+ compactions (never the user's own threads): a queued
-  lead is handed off instead of woken; an awake one gets one "Pacer: hand off
-  now" turn per compaction level. On it: make Resume current, run `node
-  ~/.agents/skills/pacer/scripts/pacer.mjs handoff --plan <plan.md>` and stop.
-  Never hand off by hand with `t3-thread.mjs --orchestrator` (pacer skill,
-  "Lead hand-off").
+- **Leads hand off too.** Without a pacer: a lead at 3+ compactions makes its
+  plan's Resume current, starts a fresh thread on the plan file and stops.
+  With a pacer installed, it does this for any thread with a pacer plan entry
+  (never the user's own threads): a queued lead is handed off instead of
+  woken; an awake one gets one "Pacer: hand off now" turn per compaction level.
+  On it: make Resume current, run `node
+  ~/.agents/skills/pacer/scripts/pacer.mjs handoff --plan <plan.md>` and stop,
+  never a hand-made `t3-thread.mjs --orchestrator` (pacer skill, "Lead hand-off").
 - **`TIMEOUT` defaults to 45 min.** Raise it (`TIMEOUT=90m`) for long work. On a
   timeout, `CONTINUE` and ask for the report from what the worker has.
 - **To wait for a job,** launch it as a background task and end the turn (or

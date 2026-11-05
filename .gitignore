@@ -5,6 +5,6 @@ __pycache__/
 *.db
 *.db-*
 .DS_Store
-go-public/personal.local.txt
-go-public/local.md
-go-public/coupling.local.txt
+# private overlay: personal values and notes next to any skill
+*.local.*
+local.md

@@ -1,46 +1,59 @@
 # russell-skills
 
-Russell Day's agent skills for Claude Code, Codex and Antigravity (AGY): the ones
-he uses every day to delegate work to other models, run multi-stage coding
-rounds through visible worker threads, and let parallel agent chats coordinate.
-They are written for a Linux or WSL machine running
-[T3 Code](https://github.com/pingdotgg/t3code) as the agent front end, and
-they work from any repo.
+Agent skills for Claude Code and Codex (and Gemini through Antigravity) for
+working with several models at once: hand work to other models in visible
+worker threads, run a list of tasks to done with a review on every stage, let
+parallel chats coordinate, score work with a multi-model council, take over
+another agent's PR, and take a private repo public. They are my daily setup,
+shared as is, and they work from any repo.
 
 Some personal skills (usage pacing, session continuity, a personal assistant
 integration) live in a separate private repo. Skills here mention them where
-they help (orchestrate queues its rounds with the pacer when one is installed)
-and work without them.
+they help ("with a pacer installed …") and work without them.
+
+## Requirements
+
+- Linux, macOS or WSL with bash, git, Node 22+ and Python 3.9+ (standard library only).
+- [Claude Code](https://code.claude.com) and/or [Codex](https://github.com/openai/codex).
+- [T3 Code](https://github.com/pingdotgg/t3code) as the agent front end for the
+  skills marked **T3** below: their workers are T3 threads you can watch and
+  steer from the sidebar. takeover and go-public need none of it.
 
 ## Skills
 
-| Skill | What it does |
-|---|---|
-| [subagents](subagents/SKILL.md) | Model and account-pool routing for delegated work (planning, UI, implementation, exploration, review), plus the dispatch scripts: T3's `delegate_task` by default, `t3-thread.mjs` for visible T3 worker threads, `run.sh` for headless runs. Includes the `t3-api.mjs` T3 adapter, `usage.mjs` limit checks, review and recheck templates, and systemd timers that settle finished worker threads and close their idle sessions |
-| [orchestrate](orchestrate/SKILL.md) | The lead loop for finishing a list of items through visible T3 workers: stages with disjoint file ownership, a plan file, dispatch, one review per stage, a fix loop on the same thread, commit on APPROVE, mark items done. Also a template for specialised orchestrators for recurring lists |
-| [message-board](message-board/SKILL.md) | A local SQLite board where parallel chats post work cards and findings, get a short brief for their area, list T3 threads, message an idle chat, and keep per-area how-to notes |
-| [council](council/SKILL.md) | A scored review by Opus, Fable and Sol 6.1 at high effort, run only when asked. All three review round 1 together, then the cheapest goes first: Opus until it scores 9/10, then Fable and Sol 6.1 together until both do. The commit or PR records every round's scores and averages. The idea comes from the `council` skill in Theo Browne's [tstack](https://github.com/t3dotgg/tstack) (MIT); the text here is our own |
-| [takeover](takeover/SKILL.md) | Take over another agent's PR, branch or thread and finish its goal: read the source and its review findings, import the original commits onto a new branch with your fixes on top, keep authorship and co-author credit, update it to the current base, verify the real workflow, then file and watch the PR |
-| [dev-projects](dev-projects/SKILL.md) | Rules for working on projects kept in OneDrive without syncing virtualenvs or `node_modules` into it (a local `C:\dev` copy, two-way synced). Needs your own `dev.ps1` runbook in OneDrive |
-| [go-public](go-public/SKILL.md) | Take a private, personal codebase public: inventory what is general and what is yours, generalize the code with a private overlay so your own setup keeps working, restructure, make setup one command (including one-click MCP install), then a full-history leak check (`publish-check.py`, gitleaks plus your personal list), clean history and the minimal open-source files, and a GitHub watcher (`gh-watch.py`) that pings you about new issues |
+| Skill | Needs | What it does |
+|---|---|---|
+| [subagents](subagents/SKILL.md) | T3 | Model and account-pool routing for delegated work (planning, UI, implementation, exploration, review), plus the dispatch scripts: T3's `delegate_task` by default, `t3-thread.mjs` for visible worker threads, `run.sh` for headless runs. Includes the `t3-api.mjs` adapter, `usage.mjs` limit checks, review and recheck templates, and optional systemd timers that settle and archive finished workers |
+| [orchestrate](orchestrate/SKILL.md) | T3 | The lead loop for finishing a list of items through visible workers: stages with disjoint file ownership, a plan file, dispatch, one review per stage, a fix loop on the same thread, commit on APPROVE, mark items done. Also a template for specialised orchestrators for recurring lists |
+| [message-board](message-board/SKILL.md) | Python | A local SQLite board where parallel chats post work cards and findings, get a short brief for their area, and keep per-area how-to notes; with T3 it also lists threads and messages an idle chat |
+| [council](council/SKILL.md) | T3 | A scored review by Opus, Fable and Sol 6.1 at high effort, run only when asked. All three review round 1 together, then the cheapest goes first: Opus until it scores 9/10, then Fable and Sol 6.1 together until both do. The commit or PR records every round's scores. The idea comes from the `council` skill in Theo Browne's [tstack](https://github.com/t3dotgg/tstack) (MIT); the text here is our own |
+| [takeover](takeover/SKILL.md) | git, gh | Take over another agent's PR, branch or thread and finish its goal: read the source and its review findings, import the original commits onto a new branch with your fixes on top, keep authorship and co-author credit, update it to the current base, verify the real workflow, then file and watch the PR |
+| [go-public](go-public/SKILL.md) | Python, gitleaks | Take a private, personal codebase public: inventory what is general and what is yours, generalize the code with a private overlay so your own setup keeps working, restructure, make setup one command (including one-click MCP install), then a full-history leak check (`publish-check.py`), clean history and the minimal open-source files, and a GitHub watcher (`gh-watch.py`) that pings you about new issues |
+
+The model names and scores in subagents and council are my own preferences
+from my own bake-offs; change them for your accounts.
 
 ## Install
 
 ```bash
-git clone https://github.com/Russell-Day/russell-skills ~/russell-skills
-~/russell-skills/install.sh
+git clone https://github.com/Russell-Day/russell-skills ~/russell-skills && ~/russell-skills/install.sh
 ```
 
 `install.sh` symlinks each skill into `~/.agents/skills/` and from there into
-`~/.claude/skills`, `~/.claude_*/skills` and `~/.codex*/skills`. Edits in this
-repo show up everywhere at once. Rerun it after adding a skill.
+`~/.claude/skills`, `~/.claude_*/skills` and `~/.codex*/skills`, so edits in the
+clone show up everywhere at once. Rerun it after pulling a new skill. (A plugin
+or `npx skills` install isn't offered: the subagents scripts are called by
+their path under `~/.agents/skills`, and the account config sits at the repo
+root.)
 
-The scripts need Node 22+ and Python 3 (standard library only; the message
-board tests use pytest).
+**Check it worked:** `ls ~/.agents/skills` lists the skills. In a new Claude Code
+or Codex session, ask *"Using the subagents skill, which model should review a
+risky change?"* The answer should come from the skill's routing table.
 
 ## Setup
 
-Copy the account templates and fill in your own:
+The skills work with the example config. To name your own accounts, copy the
+templates and fill them in:
 
 ```bash
 cd ~/russell-skills
@@ -56,8 +69,8 @@ capacity notes: which pool has room, which account is a reserve, which plans
 cost you money. The `_doc` block in `accounts.example.json` explains each field.
 
 The optional systemd user timers (`subagents/systemd/`) are installed by
-copying them to `~/.config/systemd/user/`; the subagents skill has the
-commands.
+copying them to `~/.config/systemd/user/`; see
+[subagents/references/upkeep.md](subagents/references/upkeep.md).
 
 A project can keep its own copy of a skill (for example
 `<repo>/.agents/skills/subagents` with project rules); the project copy wins
@@ -94,6 +107,13 @@ python3 -m pytest message-board/scripts/test_board.py
 The tests run against fake T3 and fake model CLIs in temp homes; they never
 call a model. `run.test.sh` needs at least two Codex accounts in
 `accounts.local.json` for its account-retry case.
+
+## Support
+
+This is a one-person project shared as is. Bug reports with steps to reproduce
+are welcome (use the issue form); I read them in a weekly batch, so replies can
+take a week or two. Requests that only fit one setup are better as a fork.
+Security problems: see [SECURITY.md](SECURITY.md).
 
 ## License
 
