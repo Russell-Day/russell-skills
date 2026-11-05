@@ -205,8 +205,8 @@
     },
     {
       "name": "oss-launch",
-      "description": "Use when taking a repo open source, or hardening one that already is.",
-      "tags": [],
+      "description": "Take a repo all the way to public: publish-check (gitleaks + your personal list over all history, commit messages, author emails, data and agent files, risky workflows, GitHub issues/runs/releases) to a GO verdict, fix files and clean history, OSS files, flip + lock down, launch. Adapted from AnayDhawan/oss-launch.",
+      "tags": ["open-source", "publishing", "security"],
       "source": {
         "repo": "https://github.com/AnayDhawan/oss-launch",
         "path": null,

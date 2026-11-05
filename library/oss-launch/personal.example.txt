@@ -1,0 +1,20 @@
+# publish-check personal list. Copy to personal.local.txt (git-ignored) and fill in.
+# One literal string per line, matched case-insensitively anywhere in files,
+# history and commit messages. Prefix a line with `re:` for a regex.
+# Your public name / GitHub handle usually belong in the repo (LICENSE, README);
+# list what must never ship instead.
+
+# emails
+you@gmail.com
+you@school.edu
+
+# phone, any separators
+re:\(?734\)?[ .-]?555[ .-]?0199
+
+# family / housemates (full names; first names alone match too much)
+Jane Doe
+
+# home address, student ID, account and machine names
+123 Maple Street
+your-tailnet-suffix
+/home/you
