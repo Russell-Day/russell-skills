@@ -74,9 +74,8 @@ fall back to `accounts.example.json`. Agents read `accounts.local.md` for
 capacity notes: which pool has room, which account is a reserve, which plans
 cost you money. The `_doc` block in `accounts.example.json` explains each field.
 
-The optional systemd user timers (`subagents/systemd/`) are installed by
-copying them to `~/.config/systemd/user/`; see
-[subagents/references/upkeep.md](subagents/references/upkeep.md).
+The optional systemd user timers (`subagents/systemd/`) install with the
+snippet in [subagents/references/upkeep.md](subagents/references/upkeep.md).
 
 A project can keep its own copy of a skill (for example
 `<repo>/.agents/skills/subagents` with project rules); the project copy wins

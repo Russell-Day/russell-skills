@@ -4,13 +4,25 @@ Three optional systemd user timers keep T3's sidebar and memory tidy when
 many workers run. Unit files are in `../systemd/`. Each script takes
 `--dry-run`.
 
+Install the ones you want (drop names from the list). The `sed` puts your own
+node's directory first on the units' `PATH`, so a node from nvm, fnm or
+Homebrew is found too:
+
+```bash
+cd ~/.agents/skills/subagents/systemd && n=$(dirname "$(command -v node)")
+for u in prune-workers settle-workers reap-sessions; do
+  sed "s#^Environment=\"PATH=#&$n:#" $u.service > ~/.config/systemd/user/$u.service
+  cp $u.timer ~/.config/systemd/user/
+done
+systemctl --user daemon-reload && systemctl --user enable --now prune-workers.timer settle-workers.timer reap-sessions.timer
+```
+
 **Old worker threads are archived.** `prune-workers.timer` runs
 `code/prune-workers.mjs` daily at 04:30: every worker thread (`[<model>] <job>`, or a `TITLE` one its job dir recorded) settled
 more than 5 days ago, with no activity since, is archived, so the sidebar keeps the
 orchestrators. Archived threads keep their transcripts (unarchive in T3), and job
 reports stay in the job directory. `--dry-run` lists them, `--days N` changes the
 age, and `--delete` deletes instead. Main threads are never touched.
-Install: `cp ~/.agents/skills/subagents/systemd/prune-workers.{service,timer} ~/.config/systemd/user/ && systemctl --user daemon-reload && systemctl --user enable --now prune-workers.timer`.
 `--settle [--min N]` settles finished delegate_task children (and the
 provider subagent threads under them) once they've been stopped for N min,
 and `[<model>] <job>` worker threads that a late report from their own helper
@@ -21,7 +33,7 @@ worker whose Claude transcript shows background work with no completion notice
 yet (`kept … background work pending` in the journal), the same check the
 reaper makes, and a Codex worker whose rollout shows an open turn, tool call
 or spawned agent; other providers' live sessions are kept until T3
-releases them. Install: `cp ~/.agents/skills/subagents/systemd/settle-workers.{service,timer} ~/.config/systemd/user/ && systemctl --user daemon-reload && systemctl --user enable --now settle-workers.timer`.
+releases them.
 
 **Finished threads' Claude and Codex sessions are closed.** T3 keeps a thread's `claude`
 process (~250 MB plus its MCP servers) for 30 min after its last activity, and
@@ -42,4 +54,4 @@ activity, and kept while its rollout shows an open turn, tool call or spawned
 agent. Each detach, keep or failure is a line
 in `~/.local/state/agent-stats/reap-sessions.log`, and a failure fails the
 unit. `--dry-run` lists, `--json` prints the result, `--idle-min N` changes the
-wait. Install: `cp ~/.agents/skills/subagents/systemd/reap-sessions.{service,timer} ~/.config/systemd/user/ && systemctl --user daemon-reload && systemctl --user enable --now reap-sessions.timer`.
+wait.

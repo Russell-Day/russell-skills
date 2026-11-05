@@ -51,7 +51,7 @@ GENERIC = {
 }
 EMAIL = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 EMAIL_OK = re.compile(
-    r"\b(noreply|no-reply)@|@users\.noreply\.github\.com$|@(example|test)\.(com|org|net)$"
+    r"^(noreply|no-reply)@|@users\.noreply\.github\.com$|@(example|test)\.(com|org|net)$"
     r"|@localhost$|^git@github\.com$|@[\w.-]*\.(png|jpg|svg|webp)$",
     re.I,
 )
@@ -75,8 +75,8 @@ AGENT_NAMES = [  # agent instructions, memory and transcripts: REVIEW (often per
 SENSITIVE_OK = {".env.example", ".env.sample", ".env.template", ".npmrc.example"}
 
 
-def sh(args, cwd=None, check=True, text=True):
-    p = subprocess.run(args, cwd=cwd, capture_output=True, text=text)
+def sh(args, cwd=None, check=True, text=True, env=None):
+    p = subprocess.run(args, cwd=cwd, capture_output=True, text=text, env=env)
     if check and p.returncode != 0:
         raise SystemExit(f"command failed: {' '.join(args)}\n{p.stderr}")
     return p
@@ -154,10 +154,17 @@ def build_patterns(personal):
 
 
 def strip_allowed(line, allows):
-    """Blank out allow: literals, so only they are excused, not the rest of the line."""
+    """Blank out allow: literals, so only they are excused, not the rest of the line.
+    A literal counts only as a whole value, never as the start or end of a longer
+    path, name or address."""
     for a in allows:
         if a:
-            line = re.sub(re.escape(a), " ", line, flags=re.I)
+            rx = re.escape(a)
+            if re.match(r"\w", a):
+                rx = r"(?<![\w.+@-])" + rx
+            if re.search(r"\w$", a):
+                rx += r"(?![\w@-]|\.\w)"
+            line = re.sub(rx, " ", line, flags=re.I)
     return line
 
 
@@ -405,12 +412,14 @@ def check_github(repo: Path, rep: Report, sec="GitHub"):
         rep.add(sec, "REVIEW", "gh not installed: repo settings and Actions secrets not checked")
         return
     remotes = sh(["git", "-C", str(repo), "remote", "-v"], check=False).stdout
-    if "github.com" not in remotes:
-        rep.add(sec, "INFO", "no GitHub remote; settings checks skipped")
+    if not remotes.strip():
+        rep.add(sec, "INFO", "no git remote yet; GitHub checks skipped (rerun once it's on GitHub)")
         return
+    # gh resolves SSH host aliases (git@github-work:...), so ask it rather than grep for github.com.
     v = sh(["gh", "repo", "view", "--json", "nameWithOwner,visibility,isFork,hasWikiEnabled"], cwd=repo, check=False)
     if v.returncode != 0:
-        rep.add(sec, "REVIEW", "GitHub checks failed (gh repo view): issues, PRs, runs, secrets and settings NOT checked",
+        rep.add(sec, "REVIEW", "GitHub checks did NOT run (gh repo view failed; fine only if this repo isn't on GitHub): "
+                "issues, PRs, runs, secrets and settings unchecked",
                 [(v.stderr or "").strip()[:200] or f"exit {v.returncode}", "fix gh auth (gh auth status) and rerun"])
         return
     info = json.loads(v.stdout)
@@ -435,9 +444,13 @@ def check_github(repo: Path, rep: Report, sec="GitHub"):
             if n:
                 rows.append(f"{n} {label}")
         if info.get("hasWikiEnabled"):
-            w = sh(["git", "ls-remote", f"https://github.com/{nwo}.wiki.git"], check=False)
+            w = sh(["git", "-c", "credential.helper=", "-c", "credential.helper=!gh auth git-credential",
+                    "ls-remote", f"https://github.com/{nwo}.wiki.git"], check=False,
+                   env={**os.environ, "GIT_TERMINAL_PROMPT": "0"})
             if w.returncode == 0 and w.stdout.strip():
                 rows.append("a wiki with pages")
+            elif w.returncode != 0 and "not found" not in (w.stderr or "").lower():  # no pages = "not found"
+                failed.append(f"wiki: {(w.stderr or '').strip()[:120] or f'exit {w.returncode}'}")
         pg = sh(["gh", "api", f"repos/{nwo}/pages", "--jq", ".html_url"], check=False)
         if pg.returncode == 0 and pg.stdout.strip():
             rows.append(f"a Pages site ({pg.stdout.strip()})")
