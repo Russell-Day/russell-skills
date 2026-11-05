@@ -188,6 +188,20 @@
       "license": "PolyForm-Shield-1.0.0",
       "kind": "has-scripts",
       "status": "known"
+    },
+    {
+      "name": "design-refs",
+      "description": "Find 3-4 really good working examples before building a UI pattern: the user's saved collection (TEDI design_refs_search), free galleries and phone/desktop screenshots of best-in-class apps, shown side by side. Scripts: shoot.py (URL -> 2 PNGs), grid.py (side-by-side image).",
+      "tags": [
+        "ui",
+        "design",
+        "web",
+        "research"
+      ],
+      "source": {},
+      "license": "MIT",
+      "kind": "has-scripts",
+      "status": "available"
     }
   ]
 }
