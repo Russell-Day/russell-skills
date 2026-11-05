@@ -85,8 +85,8 @@ recorded for the rest; "go with the guess" makes it the decision.
 
 Once answered, fill Resume. With the pacer skill installed, follow its "Day
 protocol" (enqueue or ready, priority and size, over pace, asleep) and "How to
-wait". Without it, start building right away, and wait for a known time with
-`continuity.mjs nudge`.
+wait". Without it, start building right away; to wait for a known time, use a
+session-continuity skill's `nudge` if one is installed.
 
 ## 5. Dispatch
 
@@ -274,7 +274,8 @@ Final report: stage table (items, sha, verdict), live vs needs a restart,
 deferred items with reasons, quota used, efficiency hints posted, and the
 `Did · Result · Errors · Tooling idea · Tests` block last. If the repo has a
 channel post script, post one line there (`<what shipped> · tests
-<pass/fail> · errors <none or what>`). Then `node
+<pass/fail> · errors <none or what>`). Then, if the
+session-continuity skill is installed, `node
 ~/.agents/skills/session-continuity/scripts/continuity.mjs settle`, only when
 nothing waits on the user; otherwise leave the thread open.
 
@@ -305,8 +306,8 @@ orchestrator rather than re-deriving the loop:
 
 1. Copy [templates/orchestrator-SKILL.md](templates/orchestrator-SKILL.md) to
    `<repo>/.agents/skills/<name>-orchestrator/SKILL.md` (project) or
-   `~/russell-skills/<name>/SKILL.md` (general; then run `install.sh` and add a
-   README row).
+   `<this skills repo>/<name>/SKILL.md` (general; then run `install.sh` and add
+   a README row).
 2. Fill the slots: **source adapter**, **stage rules**, **worker rules**
    (project hard rules, skills to read, test commands), **reviewers** (extra
    probes), **done criteria** (restart, deploy, the user's check), **commit

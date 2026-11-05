@@ -1,0 +1,32 @@
+name: Bug
+description: A skill or script doesn't do what its docs say
+labels: ["bug"]
+body:
+  - type: input
+    id: skill
+    attributes:
+      label: Which skill or script?
+      placeholder: "subagents / t3-thread.mjs"
+    validations: { required: true }
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect?
+    validations: { required: true }
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: "1. Ran `...`\n2. Saw `...`"
+    validations: { required: true }
+  - type: input
+    id: env
+    attributes:
+      label: Versions
+      placeholder: "OS, T3 Code / Claude Code / Codex versions, Node and Python versions, this repo's commit"
+    validations: { required: true }
+  - type: textarea
+    id: logs
+    attributes:
+      label: Output or logs (remove anything private)
+      render: shell

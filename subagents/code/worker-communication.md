@@ -1,6 +1,6 @@
 ## Worker communication
 
-Use Caveman full style for worker chat and report prose: short fragments,
+Use a terse style for worker chat and report prose (the Caveman skill's "full" level): short fragments,
 plain words, no greetings, filler, repeated plans, or routine narration.
 Give brief updates for consequential findings, blockers, and completion.
 Compress wording, not investigation or technical substance.
