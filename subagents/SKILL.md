@@ -437,11 +437,18 @@ JOB=stage-y-impl node $S/t3-thread.mjs opus /tmp/stage-y.md
   "Lead hand-off").
 - **`TIMEOUT` defaults to 45 min.** Raise it (`TIMEOUT=90m`) for long work. On a
   timeout, `CONTINUE` and ask for the report from what the worker has.
-- **To wait for a job,** poll for `exit_code`. For a `CONTINUE` run, compare its
+- **To wait for a job,** launch it as a background task and end the turn (or
+  `t3_background_wait`); never a sleep/until loop on `exit_code`. When woken,
+  read `exit_code`. For a `CONTINUE` run, compare its
   mtime with the launch time in epoch seconds, never with `-nt` against the
   wrapper log: both are written in the same second.
-- **Workers run jobs up to 10 min in the foreground** (A/B runs, benches,
-  suites). A longer job may run in the background, but the worker calls
+- **Workers run jobs in the foreground** (A/B runs, benches, suites) with a
+  fitting `timeout` parameter on Claude Code's Bash tool (max 10 min unless
+  `BASH_MAX_TIMEOUT_MS` raises it; not the GNU `timeout` command, which kills):
+  Claude Code moves a command that reaches it to the background
+  instead of killing it, then stops it after 30 more min. A job likely over
+  ~30 min starts with `run_in_background` (timeout up to 2 h). Codex workers
+  use their own wait tools. Once a job is in the background, a Claude worker calls
   `t3_background_wait` (or blocks with `wait $!` / `tail --pid`) before ending
   its turn, never ending on "I'll be notified". The job itself survives the
   turn; the wake-up doesn't always. Put this in the prompt.
