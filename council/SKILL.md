@@ -1,6 +1,6 @@
 ---
 name: council
-description: Run a council, a scored multi-model review by Opus, Fable and Sol 6.1 at high effort, looping until every member scores at least 9/10, then record the rounds and scores in the commit or PR. Use only when the user asks for a council (e.g. "council", "council this", "run the council on the plan"); it never replaces the normal review cadence.
+description: Run a council, a scored multi-model review by Opus, Fable and Sol 6.1 at high effort, looping until every member scores at least 9/10, then record the rounds and scores in the commit or PR. For UI and design ("UI council", "council the design") members score fresh screenshots against reference apps per category, and the work ends with an annotated before/after image of what changed (ui.md). Use only when the user asks for a council (e.g. "council", "council this", "run the council on the plan"); it never replaces the normal review cadence.
 ---
 
 # Council
@@ -48,9 +48,13 @@ These two lines take the place of the template's `VERDICT:` line: drop that
 line from the filled review and recheck prompts, since APPROVE/REVISE means
 nothing in a council.
 
-For a plan, design or screenshots ("council on the plan"), swap the code
-review prompt for a plain brief: what the work is for, where it lives, and the
-same addendum.
+For a plan ("council on the plan"), swap the code review prompt for a plain
+brief: what the work is for, where it lives, and the same addendum.
+
+**UI or design work** follows [ui.md](ui.md): before shots taken before any
+edit, reference apps in every round, category scores, fresh screenshots each
+round, and a required before/after image with numbered changes at the end
+([scripts/before_after.py](scripts/before_after.py)).
 
 Round 1 is blind: no member sees another's findings. Rechecks get the filled
 recheck prompt (`code/recheck-prompt.md`) listing what you changed for that
@@ -138,4 +142,5 @@ Rounds: 4 · passed at 9/10 each
 - Add a trailer line to the commit: `Council: 4 rounds, 6.7 → 9.0`.
 
 Then give the user a short summary: the score path, the findings you took, the
-ones you turned down and why, and anything still open.
+ones you turned down and why, and anything still open. A UI council also
+shows the before/after image and its legend (ui.md).
