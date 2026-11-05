@@ -16,8 +16,8 @@ phase, not a verdict: a hit is a place to look, and some hits are fine.
         [--exclude GLOB ...] [--depth N] [--top N] [--big N] [--json OUT]
 
 Terms file (default coupling.local.txt next to this skill, or $GO_PUBLIC_TERMS):
-one term per line as `kind: term`, `kind: re:<regex>`, or a bare term (kind
-"personal"). Terms match case-insensitively; `#` starts a comment. See
+one term per line as `kind: term`, `kind: re:<regex>` (a space after the
+colon), or a bare term (kind "personal"; URLs and drive paths stay whole). Terms match case-insensitively; `#` starts a comment. See
 coupling.example.txt. Read-only. Stdlib Python only.
 """
 from __future__ import annotations
@@ -60,10 +60,8 @@ def load_terms(path: Path | None):
         line = line.strip()
         if not line or line.startswith("#"):
             continue
-        kind, sep, term = line.partition(":")
-        if not sep or " " in kind.strip() or kind.strip() == "re":
-            kind, term = "personal", line
-        kind, term = kind.strip().lower(), term.strip()
+        m = re.match(r"([A-Za-z][\w-]*):\s+(\S.*)$", line)  # `kind: term` needs the space,
+        kind, term = (m.group(1).lower(), m.group(2).strip()) if m else ("personal", line)  # so URLs and C:\dev stay whole
         if term.startswith("re:"):
             out.append((kind, term[3:].strip(), re.compile(term[3:].strip(), re.I)))
         else:
@@ -125,9 +123,7 @@ def main():
         lines_of[f] = len(text)
         c = Counter()
         for line in text:
-            low = line.lower()
-            if any(x.lower() in low for x in allows):
-                continue
+            line = pc.strip_allowed(line, allows)
             for kind, label, rx in pats:
                 n = len(rx.findall(line))
                 if n:

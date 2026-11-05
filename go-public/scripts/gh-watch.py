@@ -50,6 +50,14 @@ def state_path() -> Path:
     return Path(base) / "go-public" / "gh-watch.json"
 
 
+def save(sp: Path, st: dict):
+    """Write the state atomically, so an interrupted run never leaves broken JSON."""
+    sp.parent.mkdir(parents=True, exist_ok=True)
+    tmp = sp.with_suffix(".tmp")
+    tmp.write_text(json.dumps(st, indent=1))
+    os.replace(tmp, sp)
+
+
 def token() -> str:
     t = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
     if t:
@@ -138,8 +146,7 @@ def main():
             print("GitHub digest: nothing new.")
         if not a.dry_run:
             st["digest"] = []
-            sp.parent.mkdir(parents=True, exist_ok=True)
-            sp.write_text(json.dumps(st, indent=1))
+            save(sp, st)
         return
 
     if not a.force and time.time() - st.get("polled_at", 0) < st.get("poll_interval", 60):
@@ -164,9 +171,13 @@ def main():
         if a.notify_cmd and not a.dry_run:
             key = f"gh-{t['id']}-{re.sub(r'[^0-9]', '', t.get('updated_at') or '')}"
             cmd = [c.replace("{key}", key) for c in shlex.split(a.notify_cmd)] + [msg]
-            p = subprocess.run(cmd, capture_output=True, text=True)
-            if p.returncode != 0:  # keep it for the digest rather than lose it
-                print(f"gh-watch: notify failed ({p.returncode}): {p.stderr.strip()[:200]}", file=sys.stderr)
+            try:
+                p = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+                err = None if p.returncode == 0 else f"exit {p.returncode}: {p.stderr.strip()[:200]}"
+            except (OSError, subprocess.TimeoutExpired) as e:
+                err = str(e)[:200]
+            if err:  # keep it for the digest rather than lose it
+                print(f"gh-watch: notify failed ({err})", file=sys.stderr)
                 st["digest"].append("(notify failed) " + msg)
         print("NOW " + msg)
     for t in digest:
@@ -179,8 +190,7 @@ def main():
     if len(st["seen"]) > 2000:  # keep the newest
         st["seen"] = dict(sorted(st["seen"].items(), key=lambda kv: kv[1] or "")[-1000:])
     if not a.dry_run:
-        sp.parent.mkdir(parents=True, exist_ok=True)
-        sp.write_text(json.dumps(st, indent=1))
+        save(sp, st)
 
 
 if __name__ == "__main__":

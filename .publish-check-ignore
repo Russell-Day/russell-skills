@@ -4,6 +4,7 @@ path:library/oss-launch/example/*
 path:library/oss-launch/demo/*
 path:go-public/coupling.example.txt
 allow:/home/me/
+allow:C:\Users\me
 allow:you@school.edu
 allow:you@gmail.com
 # triaged 2026-11-05: the commit email is fine to publish; the phone number is

@@ -51,7 +51,7 @@ GENERIC = {
 }
 EMAIL = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 EMAIL_OK = re.compile(
-    r"(noreply|no-reply)@|@users\.noreply\.github\.com$|@(example|test)\.(com|org|net)$"
+    r"\b(noreply|no-reply)@|@users\.noreply\.github\.com$|@(example|test)\.(com|org|net)$"
     r"|@localhost$|^git@github\.com$|@[\w.-]*\.(png|jpg|svg|webp)$",
     re.I,
 )
@@ -153,15 +153,24 @@ def build_patterns(personal):
     return pats
 
 
+def strip_allowed(line, allows):
+    """Blank out allow: literals, so only they are excused, not the rest of the line."""
+    for a in allows:
+        if a:
+            line = re.sub(re.escape(a), " ", line, flags=re.I)
+    return line
+
+
 def line_hits(line, pats, allows):
+    line = strip_allowed(line, allows)
     hits = []
     for label, rx in pats:
         m = rx.search(line)
-        if m and not any(a.lower() in line.lower() for a in allows):
+        if m:
             hits.append((label, m.group(0)))
     for m in EMAIL.finditer(line):
         e = m.group(0)
-        if not EMAIL_OK.search(e) and not any(a.lower() in e.lower() for a in allows):
+        if not EMAIL_OK.search(e):
             hits.append(("email", e))
     return hits
 
@@ -233,7 +242,7 @@ def check_tree_text(tree: Path, files, pats, globs, allows, rep: Report, sec="Pe
 def check_history_text(repo: Path, current_hits_files, pats, globs, allows, rep: Report, sec="Personal info"):
     """Added lines and commit messages across all history, current file aside."""
     p = subprocess.Popen(
-        ["git", "-C", str(repo), "log", "--all", "-p", "--no-color", "--no-ext-diff",
+        ["git", "-C", str(repo), "log", "--all", "-p", "--diff-merges=first-parent", "--no-color", "--no-ext-diff",
          "--no-renames", "--format=@@C %h %ad%n%B@@E", "--date=short"],
         stdout=subprocess.PIPE, text=True, errors="replace")
     commit, path, in_msg = "", "", False
@@ -372,6 +381,7 @@ def check_remote_refs(repo: Path, rep: Report, sec="Secrets"):
 
 
 def check_github(repo: Path, rep: Report, sec="GitHub"):
+    failed = []  # GitHub queries that errored: unchecked, never "empty"
     wf = repo / ".github" / "workflows"
     if wf.is_dir():
         selfh, prt, inj = [], [], []
@@ -394,18 +404,26 @@ def check_github(repo: Path, rep: Report, sec="GitHub"):
     if not shutil.which("gh"):
         rep.add(sec, "REVIEW", "gh not installed: repo settings and Actions secrets not checked")
         return
+    remotes = sh(["git", "-C", str(repo), "remote", "-v"], check=False).stdout
+    if "github.com" not in remotes:
+        rep.add(sec, "INFO", "no GitHub remote; settings checks skipped")
+        return
     v = sh(["gh", "repo", "view", "--json", "nameWithOwner,visibility,isFork,hasWikiEnabled"], cwd=repo, check=False)
     if v.returncode != 0:
-        rep.add(sec, "INFO", "no GitHub remote found (gh repo view failed); settings checks skipped")
+        rep.add(sec, "REVIEW", "GitHub checks failed (gh repo view): issues, PRs, runs, secrets and settings NOT checked",
+                [(v.stderr or "").strip()[:200] or f"exit {v.returncode}", "fix gh auth (gh auth status) and rerun"])
         return
     info = json.loads(v.stdout)
     rep.add(sec, "INFO", f"{info['nameWithOwner']} is {info['visibility'].lower()}")
     nwo = info["nameWithOwner"]
     if info["visibility"] != "PUBLIC":
         # Everything on GitHub goes public with the code, not just git history.
-        def count(args):
+        def count(label, args):
             r = sh(args, cwd=repo, check=False)
-            return len([l for l in r.stdout.splitlines() if l.strip()]) if r.returncode == 0 else 0
+            if r.returncode != 0:
+                failed.append(f"{label}: {(r.stderr or '').strip()[:120] or f'exit {r.returncode}'}")
+                return 0
+            return len([l for l in r.stdout.splitlines() if l.strip()])
         rows = []
         for label, args in (
             ("issues", ["gh", "issue", "list", "--state", "all", "--limit", "1000", "--json", "number", "--jq", ".[].number"]),
@@ -413,7 +431,7 @@ def check_github(repo: Path, rep: Report, sec="GitHub"):
             ("Actions runs (logs + artifacts)", ["gh", "run", "list", "--limit", "1000", "--json", "databaseId", "--jq", ".[].databaseId"]),
             ("releases (assets)", ["gh", "release", "list", "--limit", "1000", "--json", "tagName", "--jq", ".[].tagName"]),
         ):
-            n = count(args)
+            n = count(label, args)
             if n:
                 rows.append(f"{n} {label}")
         if info.get("hasWikiEnabled"):
@@ -423,11 +441,15 @@ def check_github(repo: Path, rep: Report, sec="GitHub"):
         pg = sh(["gh", "api", f"repos/{nwo}/pages", "--jq", ".html_url"], check=False)
         if pg.returncode == 0 and pg.stdout.strip():
             rows.append(f"a Pages site ({pg.stdout.strip()})")
+        elif pg.returncode != 0 and "404" not in (pg.stderr or ""):
+            failed.append(f"Pages: {(pg.stderr or '').strip()[:120]}")
         if rows:
             rep.add(sec, "REVIEW", "these go public with the repo (comments, screenshots, logs included); "
                     "read or delete before the flip (references/publish-check.md step 3)", rows)
     s = sh(["gh", "secret", "list"], cwd=repo, check=False)
-    if s.returncode == 0 and s.stdout.strip():
+    if s.returncode != 0:
+        failed.append(f"Actions secrets: {(s.stderr or '').strip()[:120] or f'exit {s.returncode}'}")
+    elif s.stdout.strip():
         rep.add(sec, "REVIEW", "Actions secrets exist: check no workflow can leak them to fork PRs",
                 [l.split("\t")[0] for l in s.stdout.splitlines()])
     if info["visibility"] != "PUBLIC":
@@ -438,10 +460,14 @@ def check_github(repo: Path, rep: Report, sec="GitHub"):
             d = json.loads(sa.stdout or "{}") or {}
         except json.JSONDecodeError:
             d = {}
+        if sa.returncode != 0:
+            failed.append(f"security settings: {(sa.stderr or '').strip()[:120]}")
         off = [k for k in ("secret_scanning", "secret_scanning_push_protection")
                if (d.get(k) or {}).get("status") != "enabled"]
         if off:
             rep.add(sec, "REVIEW", "public repo without " + " / ".join(off), ["see references/publish-check.md, step 6"])
+    if failed:
+        rep.add(sec, "REVIEW", "GitHub queries failed, so these were NOT checked (not the same as empty)", failed)
 
 
 def main():

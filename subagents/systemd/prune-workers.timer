@@ -1,0 +1,9 @@
+[Unit]
+Description=Archive old T3 worker threads daily
+
+[Timer]
+OnCalendar=*-*-* 04:30
+Persistent=true
+
+[Install]
+WantedBy=timers.target

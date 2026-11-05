@@ -13,11 +13,17 @@ they help ("with a pacer installed …") and work without them.
 
 ## Requirements
 
-- Linux, macOS or WSL with bash, git, Node 22+ and Python 3.9+ (standard library only).
+- Linux, macOS or WSL with bash, git, Node 22+ and Python 3.9+. The scripts use
+  only the standard library; the message-board tests need pytest, go-public's
+  leak check needs [gitleaks](https://github.com/gitleaks/gitleaks), and the
+  council's before/after images need [uv](https://docs.astral.sh/uv/) (it
+  fetches Playwright).
 - [Claude Code](https://code.claude.com) and/or [Codex](https://github.com/openai/codex).
 - [T3 Code](https://github.com/pingdotgg/t3code) as the agent front end for the
   skills marked **T3** below: their workers are T3 threads you can watch and
   steer from the sidebar. takeover and go-public need none of it.
+- Optional: Google's [Antigravity](https://antigravity.google) CLI (`agy`, called
+  AGY in the skills) for the cheap Gemini helpers that `run.sh` starts.
 
 ## Skills
 
@@ -40,7 +46,7 @@ git clone https://github.com/Russell-Day/russell-skills ~/russell-skills && ~/ru
 ```
 
 `install.sh` symlinks each skill into `~/.agents/skills/` and from there into
-`~/.claude/skills`, `~/.claude_*/skills` and `~/.codex*/skills`, so edits in the
+`~/.claude/skills` and each existing `~/.claude_*` and `~/.codex*` home, so edits in the
 clone show up everywhere at once. Rerun it after pulling a new skill. (A plugin
 or `npx skills` install isn't offered: the subagents scripts are called by
 their path under `~/.agents/skills`, and the account config sits at the repo
