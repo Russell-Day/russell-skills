@@ -22,6 +22,7 @@ and work without them.
 | [council](council/SKILL.md) | A scored review by Opus, Fable and Sol 6.1 at high effort, run only when asked. All three review round 1 together, then the cheapest goes first: Opus until it scores 9/10, then Fable and Sol 6.1 together until both do. The commit or PR records every round's scores and averages. The idea comes from the `council` skill in Theo Browne's [tstack](https://github.com/t3dotgg/tstack) (MIT); the text here is our own |
 | [takeover](takeover/SKILL.md) | Take over another agent's PR, branch or thread and finish its goal: read the source and its review findings, import the original commits onto a new branch with your fixes on top, keep authorship and co-author credit, update it to the current base, verify the real workflow, then file and watch the PR |
 | [dev-projects](dev-projects/SKILL.md) | Rules for working on projects kept in OneDrive without syncing virtualenvs or `node_modules` into it (a local `C:\dev` copy, two-way synced). Needs your own `dev.ps1` runbook in OneDrive |
+| [go-public](go-public/SKILL.md) | Take a private, personal codebase public: inventory what is general and what is yours, generalize the code with a private overlay so your own setup keeps working, restructure, make setup one command (including one-click MCP install), then a full-history leak check (`publish-check.py`, gitleaks plus your personal list), clean history and the minimal open-source files, and a GitHub watcher (`gh-watch.py`) that pings you about new issues |
 
 ## Install
 

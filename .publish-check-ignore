@@ -1,4 +1,8 @@
-# publish-check allowlist (see library/oss-launch/references/publish-check.md)
-path:library/oss-launch/personal.example.txt
+# publish-check allowlist (see go-public/references/publish-check.md)
+path:go-public/personal.example.txt
 path:library/oss-launch/example/*
 path:library/oss-launch/demo/*
+path:go-public/coupling.example.txt
+allow:/home/me/
+allow:you@school.edu
+allow:you@gmail.com

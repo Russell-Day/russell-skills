@@ -205,8 +205,11 @@
     },
     {
       "name": "oss-launch",
-      "description": "Take a repo all the way to public: publish-check (gitleaks + your personal list over all history, commit messages, author emails, data and agent files, risky workflows, GitHub issues/runs/releases) to a GO verdict, fix files and clean history, OSS files, flip + lock down, launch. Adapted from AnayDhawan/oss-launch.",
-      "tags": ["open-source", "publishing", "security"],
+      "description": "Scaffold open-source files for a repo (README, LICENSE, CONTRIBUTING, Code of Conduct, SECURITY, issue/PR templates, CI per stack) plus a Show HN/Reddit launch playbook. For the whole private-to-public walk use go-public.",
+      "tags": [
+        "open-source",
+        "templates"
+      ],
       "source": {
         "repo": "https://github.com/AnayDhawan/oss-launch",
         "path": null,
