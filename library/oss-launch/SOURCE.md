@@ -157,6 +157,41 @@
 - `tests/run.sh`
 - `tests/verify-bundles.sh`
 
+## Changed here (2026-11-05)
+
+Adapted so the skill walks a repo all the way to public and proves nothing private ships.
+
+- **New `scripts/publish-check.py`** (stdlib Python, read-only): GO / NO-GO over every
+  commit on every branch and tag, commit messages, author emails, the files that would
+  be pushed now, and GitHub state. gitleaks for secrets (missing gitleaks = BLOCK, never
+  a silent skip); the user's git-ignored `personal.local.txt` plus home paths, private
+  and Tailscale IPs, `.local`/`.lan` hosts, emails, phone numbers; key/env/data/binary
+  and agent files now or ever in history; big blobs; submodules; outside symlinks;
+  unfetched remote refs (incl. `refs/pull/*`); self-hosted runners,
+  `pull_request_target`, workflow script injection; issues/PRs/runs/releases/wiki/Pages
+  that go public with the flip; secret scanning + push protection once public. Works
+  on a bare `--mirror` clone, so a rewritten history is checked before it is pushed.
+- **New `references/publish-check.md`**: the fix-it walkthrough (triage, read-through,
+  edit the files, fresh-history or `git filter-repo` rewrite in a temp mirror, recheck
+  to GO, flip with an explicit yes, lock down).
+- **`SKILL.md`**: steps 0-7 run through publish-check; the old fix-nothing grep in
+  `references/scan.md` is replaced by it; limitations updated.
+- **`personal.example.txt`** added; `personal.local.txt` is git-ignored in this repo.
+
+Borrowed (all MIT), adapted rather than copied:
+- daymade/claude-code-skills `github-sensitive-data-cleanup`: the semantic read-through
+  (step 2b), `--replace-message` alongside `--replace-text`.
+- escoffier-labs/skillet `publish-readiness`: tracked agent-session files, unfetched
+  remote refs, RFC 5737 documentation IPs, redacted gitleaks output.
+- kajisho5/github-solo-skill: solo-safe default-branch ruleset (no delete / force-push,
+  no required reviews).
+- escoffier-labs/skillet `supply-chain-harden`: workflow script-injection check.
+- lukemcqueen/steadfaste-fleet `pii-scrubbing`: personal names in file and folder paths.
+
+Researched, not taken: trufflehog (gitleaks is enough), BFG (filter-repo is GitHub's
+recommendation), dependency license ledgers and README scoring (too heavy for personal
+repos; step 3 mentions `pip-licenses` / `license-checker` instead).
+
 ## Dropped
 
 Nothing from the skill folder.
