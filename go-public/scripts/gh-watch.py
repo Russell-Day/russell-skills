@@ -53,7 +53,7 @@ def state_path() -> Path:
 def save(sp: Path, st: dict):
     """Write the state atomically, so an interrupted run never leaves broken JSON."""
     sp.parent.mkdir(parents=True, exist_ok=True)
-    tmp = sp.with_suffix(".tmp")
+    tmp = sp.with_suffix(f".{os.getpid()}.tmp")
     tmp.write_text(json.dumps(st, indent=1))
     os.replace(tmp, sp)
 
