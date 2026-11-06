@@ -56,6 +56,10 @@ if (!w) {
   console.error(`no ${windowName} window for ${instance}; instances: ${accounts.map((a) => a.instance).join(", ")}`);
   process.exit(2);
 }
+if (!Number.isFinite(Date.parse(w.resetsAt)) || !Number.isFinite(w.usedPercent)) {
+  console.error(`${instance} ${windowName} window has no reset time or usage yet (${JSON.stringify(w)}); try again without --cached`);
+  process.exit(2);
+}
 
 function pace({ usedPercent, resetsAt }, { hours, margin, band, now = Date.now() }) {
   const len = hours * 3600e3;

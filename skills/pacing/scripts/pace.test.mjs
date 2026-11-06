@@ -48,3 +48,10 @@ test("unknown instance exits 2 with the instances listed", () => {
   assert.throws(() => execFileSync("node", [script, "--instance", "nope", "--usage-file", usage(1)], { stdio: "pipe" }),
     (e) => e.status === 2 && /instances: claude/.test(String(e.stderr)));
 });
+
+test("a window with no reset time is an error, not on pace", () => {
+  const f = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "pace-")), "u.json");
+  fs.writeFileSync(f, JSON.stringify([{ instance: "claude", windows: [{ label: "Session", usedPercent: 95, resetsAt: null }] }]));
+  assert.throws(() => execFileSync("node", [script, "--instance", "claude", "--usage-file", f], { stdio: "pipe" }),
+    (e) => e.status === 2 && /no reset time/.test(String(e.stderr)));
+});
