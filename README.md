@@ -7,6 +7,7 @@ and keep track of it. I use them every day, and they work in any repo.
 
 | Skill | What it does |
 |---|---|
+| [setup](skills/setup/SKILL.md) | Walks you through setup. It asks which skills you want, reads your T3 Code accounts and limits if you allow it, and writes the account files. |
 | [subagents](skills/subagents/SKILL.md) | Picks a model and an account for each piece of delegated work, and starts the workers. |
 | [orchestrate](skills/orchestrate/SKILL.md) | Works through a list of tasks with workers, reviews each stage, and commits the stages that pass. |
 | [pacing](skills/pacing/SKILL.md) | Before you start more workers, checks whether you are using up your 5-hour or weekly usage too fast. |
@@ -34,6 +35,11 @@ git clone https://github.com/Russell-Day/russell-skills ~/russell-skills
 `install.sh` links each skill into `~/.agents/skills/` and from there into
 your Claude Code and Codex skill folders, so a `git pull` updates every agent
 at once. Run `install.sh` again when a new skill appears.
+
+Then start a new Claude Code or Codex session and say "Use the setup skill to
+set me up." The agent checks what is missing, asks which skills you want, and
+writes your account files. The sections below show how to do the same steps
+by hand.
 
 To check the install, start a new session and ask "Using the subagents skill,
 which model should review a risky change?" The answer should name a model from
@@ -94,7 +100,7 @@ If you use only one of the two agents, make only its link.
 ## Tests
 
 ```bash
-node --test skills/subagents/code/*.test.mjs skills/pacing/scripts/*.test.mjs
+node --test skills/subagents/code/*.test.mjs skills/pacing/scripts/*.test.mjs skills/setup/scripts/*.test.mjs
 bash skills/subagents/code/run.test.sh
 uvx pytest skills/message-board/scripts/test_board.py
 ```
