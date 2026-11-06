@@ -52,6 +52,7 @@ const TOOLS = [
   { bin: "gitleaks", for: "go-public (the leak check)" },
   { bin: "git-filter-repo", for: "go-public (history rewrites)" },
   { bin: "uv", for: "council (before-and-after images)" },
+  { bin: "timeout", for: "subagents' headless workers (run.sh). On macOS: brew install coreutils, then put its gnubin folder on PATH" },
   { bin: "agy", for: "subagents, optional (cheap Gemini helpers)" },
 ];
 
@@ -188,11 +189,22 @@ function printDetect(r) {
 // choice with the user before writing.
 function draft(d) {
   const on = d.instances.filter((i) => i.enabled);
+  const problems = [];
+  const offIds = (driver) => d.instances.filter((i) => i.driver === driver && !i.enabled).map((i) => i.id).join(", ");
   const claudes = on.filter((i) => i.driver === "claudeAgent");
+  if (!claudes.length) problems.push(`No Claude account is on in T3 (off: ${offIds("claudeAgent")}). Turn one on in T3 Code and run draft again.`);
   const lead = claudes.find((i) => !/worker|haiku/i.test(i.id)) ?? claudes[0] ?? { id: "claudeAgent", home: "~/.claude" };
   const worker = claudes.find((i) => i !== lead && i.home === lead.home && /worker/i.test(i.id)) ?? lead;
   const codexes = on.filter((i) => i.driver === "codex");
-  const accounts = codexes.map((i) => ({ name: i.id === "codex" ? "main" : i.id.replace(/^codex_?/, "") || i.id, home: i.home, t3Instance: i.id, reserve: false }));
+  if (!codexes.length) problems.push(`No Codex account is on in T3 (off: ${offIds("codex")}). Turn one on in T3 Code and run draft again.`);
+  // Account names are what ACCOUNT=<name> picks, so they must be unique: codex is
+  // "main", codex_x is "x", and a name already taken falls back to the full id.
+  const accounts = [];
+  for (const i of codexes) {
+    let name = i.id === "codex" ? "main" : i.id.replace(/^codex_?/, "") || i.id;
+    if (accounts.some((a) => a.name === name) || codexes.some((c) => c !== i && c.id === "codex" && name === "main")) name = i.id;
+    accounts.push({ name, home: i.home, t3Instance: i.id, reserve: false });
+  }
   if (!accounts.length) accounts.push({ name: "main", home: "~/.codex", t3Instance: "codex", reserve: false });
   const json = {
     claude: { configDir: lead.home, t3Instance: lead.id, t3WorkerInstance: worker.id },
@@ -221,10 +233,11 @@ ${off.length ? `\nDisabled in T3, so not used: ${off.join(", ")}.\n` : ""}
 - Reserve account (used only when the others run low):
 - Plans that cost extra money when you go over:
 `;
-  return { json, md };
+  return { json, md, problems };
 }
 
-function writeDrafts({ json, md }) {
+function writeDrafts({ json, md, problems }) {
+  if (problems.length && !flag("force")) return ["Not written:", ...problems.map((p) => `  ${p}`), "Or write anyway with --force and edit the file."];
   const out = [];
   for (const [name, body] of [["accounts.local.json", JSON.stringify(json, null, 2) + "\n"], ["accounts.local.md", md]]) {
     const f = path.join(accountsDir, name);
@@ -243,9 +256,13 @@ if (cmd === "check") {
   flag("json") ? console.log(JSON.stringify(r, null, 2)) : printDetect(r);
 } else if (cmd === "draft") {
   const d = draft(detect());
-  if (flag("write")) console.log(writeDrafts(d).join("\n"));
+  if (flag("write")) {
+    const out = writeDrafts(d);
+    console.log(out.join("\n"));
+    if (out[0] === "Not written:") process.exit(1);
+  }
   else if (flag("json")) console.log(JSON.stringify(d, null, 2));
-  else console.log(`accounts.local.json\n\n${JSON.stringify(d.json, null, 2)}\n\naccounts.local.md\n\n${d.md}`);
+  else console.log(`${d.problems.map((p) => `PROBLEM: ${p}\n`).join("")}accounts.local.json\n\n${JSON.stringify(d.json, null, 2)}\n\naccounts.local.md\n\n${d.md}`);
 } else {
   console.log(fs.readFileSync(fileURLToPath(import.meta.url), "utf8").split("\n").slice(1, 15).map((l) => l.replace(/^\/\/ ?/, "")).join("\n"));
   process.exit(cmd && cmd !== "--help" && cmd !== "help" ? 2 : 0);
