@@ -8,6 +8,7 @@
 //
 //   --json               machine-readable output
 //   --no-usage           skip the plan and limit check (it needs T3 running)
+//   --no-agy             skip only the Antigravity quota (it uses your saved Google login)
 //   --usage-file f.json  read usage.mjs --json output from a file (tests)
 //
 // detect reads only these fields of T3's settings.json: each provider instance's id,
@@ -149,7 +150,7 @@ function usage() {
   try {
     const raw = opt("usage-file")
       ? fs.readFileSync(opt("usage-file"), "utf8")
-      : execFileSync("node", [path.join(subagents, "code/usage.mjs"), "--json"], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 120000 });
+      : execFileSync("node", [path.join(subagents, "code/usage.mjs"), "--json", ...(flag("no-agy") ? ["--no-agy"] : [])], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 120000 });
     return { accounts: JSON.parse(raw) };
   } catch (e) {
     return { error: (e.stderr?.toString() || e.message).trim().split("\n")[0] };
@@ -201,8 +202,10 @@ function draft(d) {
   // "main", codex_x is "x", and a name already taken falls back to the full id.
   const accounts = [];
   for (const i of codexes) {
+    const taken = (n) => accounts.some((a) => a.name === n) || (n === "main" && i.id !== "codex" && codexes.some((c) => c.id === "codex"));
     let name = i.id === "codex" ? "main" : i.id.replace(/^codex_?/, "") || i.id;
-    if (accounts.some((a) => a.name === name) || codexes.some((c) => c !== i && c.id === "codex" && name === "main")) name = i.id;
+    if (taken(name)) name = i.id;
+    for (let n = 2; taken(name); n++) name = `${i.id}-${n}`;
     accounts.push({ name, home: i.home, t3Instance: i.id, reserve: false });
   }
   if (!accounts.length) accounts.push({ name: "main", home: "~/.codex", t3Instance: "codex", reserve: false });
@@ -264,6 +267,6 @@ if (cmd === "check") {
   else if (flag("json")) console.log(JSON.stringify(d, null, 2));
   else console.log(`${d.problems.map((p) => `PROBLEM: ${p}\n`).join("")}accounts.local.json\n\n${JSON.stringify(d.json, null, 2)}\n\naccounts.local.md\n\n${d.md}`);
 } else {
-  console.log(fs.readFileSync(fileURLToPath(import.meta.url), "utf8").split("\n").slice(1, 15).map((l) => l.replace(/^\/\/ ?/, "")).join("\n"));
+  console.log(fs.readFileSync(fileURLToPath(import.meta.url), "utf8").split("\n").slice(1).filter((l, i, all) => all.slice(0, i + 1).every((x) => x.startsWith("//"))).map((l) => l.replace(/^\/\/ ?/, "")).join("\n"));
   process.exit(cmd && cmd !== "--help" && cmd !== "help" ? 2 : 0);
 }

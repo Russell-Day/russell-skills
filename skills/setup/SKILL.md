@@ -66,6 +66,10 @@ Ask before you run this step. Tell them what it reads:
   the saved Google login to ask Google's quota service, and may refresh that
   login. Ask about this part on its own.
 
+If they say no to the Antigravity part, add `--no-agy` to every `setup.mjs`
+and `usage.mjs` command from here on. If they say no to all of it, use
+`--no-usage` with `setup.mjs` and skip the `usage.mjs` check in step 6.
+
 Then run `setup.mjs detect`. It shows the plans and limits only while T3 Code
 is running. If T3 isn't running, ask them to start it, or run
 `setup.mjs detect --no-usage` to skip the limits.
