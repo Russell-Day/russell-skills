@@ -7,7 +7,7 @@ description: Take over existing work and finish its original goal while keeping 
 
 You now own finishing the original goal, and the original contributors keep
 their credit. Don't defend an implementation just because another agent
-already built it.
+already built it. Read `local.md` next to this file first if it exists.
 
 ## 1. Read the source
 
@@ -66,9 +66,8 @@ already built it.
 
 When the finish includes a PR:
 
-- Write the title and description with the `pr-write` skill if it's
-  installed. Otherwise write a short, plain description: why, what changed,
-  what ran, what's still open, and the credit from step 3.
+- Write a short, plain description: why, what changed, what ran, what's
+  still open, and the credit from step 3.
 - Don't stop at creating the PR. Watch it until checks and reviews settle
   (T3: `watch_pull_request`) and fix what they turn up.
 - Keep replies to review comments short and direct: what you changed, or

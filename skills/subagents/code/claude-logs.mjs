@@ -62,8 +62,8 @@ const LABELS = { five_hour: "Session", seven_day: "Weekly" };
 // The thread logs are the source: every live log window replaces T3's probe
 // window of the same label. T3's probe is only the fallback when the logs hold
 // no live window (no Claude turn since the reset). The probe kept reading
-// stale (0% with no reset time, or 14% vs a real 31%) and
-// the pacer acted on it.
+// stale (0% with no reset time, or 14% vs a real 31%), and
+// pacing decisions went wrong.
 export function applyClaudeLogs(accounts, latest, now = Date.now()) {
   if (!latest) return accounts;
   for (const a of accounts) {

@@ -463,7 +463,7 @@ export function mainModelSelection(model = "opus", effort = "high") {
   return { instanceId: claudeAccount.t3Instance, model: id, options: [{ id: "effort", value: effort }, ...(model === "opus" ? [{ id: "fastMode", value: false }] : [])] };
 }
 
-// A main thread on the default Codex account: the pacer's emergency fallback when the Claude
+// A main thread on the default Codex account: a fallback when the Claude
 // thread fails (an expired Claude login once killed one in 2 s).
 export function codexMainSelection(model = "gpt-6.1-sol", effort = "high") {
   const instanceId = codexAccount(codexDefault)?.t3Instance;
