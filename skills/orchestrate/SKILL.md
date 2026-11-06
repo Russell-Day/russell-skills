@@ -73,6 +73,13 @@ the user's decisions, open questions, the commit rule, and a **Resume**
 section (stage status, decisions, next step, open risks). Keep the status
 column and Resume current: the lead, the user and a woken thread read them.
 
+Numbered plan folders (`<N>-<slug>`): take the number before writing
+anything, with the repo's allocator if it has one. Without one, create the
+folder at once (`mkdir` without `-p`), then list `planning/<N>-*`: if another
+folder has your number, remove yours and try N+1. Picking "highest + 1" and
+creating the folder minutes later gives two parallel leads the same number. A "Wait for: plan N" line names the folder too
+(`planning/<N>-<slug>/plan.md`).
+
 ## 4. Questions, then queue
 
 Only for decisions that are the user's (taste, priority, money or quota,
