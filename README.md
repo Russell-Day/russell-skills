@@ -13,11 +13,12 @@ and keep track of it. I use them every day, and they work in any repo.
 | [council](skills/council/SKILL.md) | Has three models score a piece of work, and repeats until all three give it 9/10. Based on the council skill in Theo Browne's [tstack](https://github.com/t3dotgg/tstack). |
 | [message-board](skills/message-board/SKILL.md) | Lets agent chats that run in parallel share findings through a local SQLite board. |
 | [takeover](skills/takeover/SKILL.md) | Finishes another agent's PR or branch and keeps the original authors' credit. |
-| [go-public](skills/go-public/SKILL.md) | Takes a private repo public. It removes personal details, checks the whole history for leaks, and sets up a watcher for new issues. |
+| [go-public](skills/go-public/SKILL.md) | Helps you take a private repo public. It finds personal details for you to remove, checks the whole git history for leaks, and sets up a watcher for new issues. |
 
 subagents, orchestrate, pacing and council run their workers as
-[T3 Code](https://github.com/pingdotgg/t3code) threads, so they need T3. The
-model names in subagents and council are my picks from my own tests. Change
+[T3 Code](https://github.com/pingdotgg/t3code) threads, so T3 Code has to be
+running on the same machine. Your own session can run in T3 or in a terminal.
+The model names in subagents and council are my picks from my own tests. Change
 them to fit your accounts.
 
 ## Install
@@ -35,18 +36,24 @@ your Claude Code and Codex skill folders, so a `git pull` updates every agent
 at once. Run `install.sh` again when a new skill appears.
 
 To check the install, start a new session and ask "Using the subagents skill,
-which model should review a risky change?"
+which model should review a risky change?" The answer should name a model from
+the routing table in [subagents](skills/subagents/SKILL.md).
 
-A few skills need one more tool:
+Some skills need another tool:
 
-- go-public needs [gitleaks](https://github.com/gitleaks/gitleaks).
+- go-public needs [gitleaks](https://github.com/gitleaks/gitleaks),
+  [git-filter-repo](https://github.com/newren/git-filter-repo) and the
+  [GitHub CLI](https://cli.github.com) (`gh`).
+- takeover needs `gh`.
 - council needs [uv](https://docs.astral.sh/uv/) for its before-and-after images.
-- subagents can use Google's [Antigravity](https://antigravity.google) CLI
-  (`agy`) to run cheap Gemini helpers.
+
+One tool is optional. With Google's [Antigravity](https://antigravity.google)
+CLI (`agy`) installed, subagents can run cheap Gemini helpers.
 
 ## Your accounts
 
-The skills run with the example account file. To use your own accounts, copy
+The example account file uses one Claude login in `~/.claude` and one Codex
+login in `~/.codex`. If that is your setup, skip this section. Otherwise, copy
 the two templates:
 
 ```bash
@@ -70,9 +77,19 @@ To clean up finished worker threads on a timer, install the systemd units in
 
 `library/` holds skills by other people that only some projects need, such as
 design, React and writing skills. Each one keeps its license and a `SOURCE.md`
-that says where it came from. `install.sh` doesn't install them. To use one in
-a project, link `library/<name>` into that project's `.agents/skills/` and
-`.claude/skills/` folders, and list both links in `.git/info/exclude`.
+that says where it came from. `install.sh` doesn't install them.
+
+To use one in a project, run this from the project's root. It links the
+`unslop` skill and keeps the links out of git:
+
+```bash
+mkdir -p .agents/skills .claude/skills
+ln -s ~/russell-skills/library/unslop .agents/skills/unslop   # Codex
+ln -s ~/russell-skills/library/unslop .claude/skills/unslop   # Claude Code
+printf '%s\n' .agents/skills/unslop .claude/skills/unslop >> .git/info/exclude
+```
+
+If you use only one of the two agents, make only its link.
 
 ## Tests
 
