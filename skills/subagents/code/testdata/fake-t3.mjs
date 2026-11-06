@@ -1,4 +1,4 @@
-// Test preload: a fake T3 server for running t3-thread.mjs, pacer.mjs and the other T3 scripts
+// Test preload: a fake T3 server for running t3-thread.mjs and the other T3 scripts
 // end to end, offline. `node --import <this file> script.mjs ...` with FAKE_T3=<json file>:
 //   { projects: [{ project_id, workspace_root }],
 //     threads: [{ thread_id, title, project_id, model_selection_json, pinned_at, settled_at,
@@ -10,7 +10,7 @@
 //     providerThreads: [{ thread_id, driver, native_id }], usage: <usage.mjs --json>,
 //     providers: [<server.getConfig provider>], commands: [] }
 // Queries on T3 0.1.0 tables run for real: the JSON becomes an in-memory SQLite DB built from
-// statev2-schema.sql (T3's own DDL). Older queries (pacer, until it moves to t3-api.mjs) are
+// statev2-schema.sql (T3's own DDL). Older queries (scripts not yet on t3-api.mjs) are
 // answered by substring. Every command is appended to `commands` and applied; message.dispatch
 // opens a run that ends at once with "fake reply", or with what `globalThis.fakeT3Outcome(thread,
 // command, db)` returns ({ status, reply, error: { class, message } }), which a test preload can

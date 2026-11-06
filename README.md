@@ -28,6 +28,7 @@ shared as is, and they work from any repo.
 | [subagents](skills/subagents/SKILL.md) | T3 | Model and account-pool routing for delegated work (planning, UI, implementation, exploration, review), plus the dispatch scripts: T3's `delegate_task` by default, `t3-thread.mjs` for visible worker threads, `run.sh` for headless runs. Includes the `t3-api.mjs` adapter, `usage.mjs` limit checks, review and recheck templates, and optional systemd timers that settle and archive finished workers |
 | [orchestrate](skills/orchestrate/SKILL.md) | T3 | The lead loop for finishing a list of items through visible workers: stages with disjoint file ownership, a plan file, dispatch, one review per stage, a fix loop on the same thread, commit on APPROVE, mark items done. Also a template for specialised orchestrators for recurring lists |
 | [message-board](skills/message-board/SKILL.md) | Python | A local SQLite board where parallel chats post work cards and findings, get a short brief for their area, and keep per-area how-to notes; with T3 it also lists threads and messages an idle chat |
+| [pacing](skills/pacing/SKILL.md) | T3 | Spend the 5-hour and weekly usage windows evenly: `pace.mjs` compares used % with an even-spend line, and the rules say when to start workers, start one, or queue the rest for after the reset |
 | [council](skills/council/SKILL.md) | T3 | A scored review by Opus, Fable and Sol 6.1 at high effort, run only when asked. All three review round 1 together, then the cheapest goes first: Opus until it scores 9/10, then Fable and Sol 6.1 together until both do. The commit or PR records every round's scores. The idea comes from the `council` skill in Theo Browne's [tstack](https://github.com/t3dotgg/tstack) (MIT); the text here is our own |
 | [takeover](skills/takeover/SKILL.md) | git, gh | Take over another agent's PR, branch or thread and finish its goal: read the source and its review findings, import the original commits onto a new branch with your fixes on top, keep authorship and co-author credit, update it to the current base, verify the real workflow, then file and watch the PR |
 | [go-public](skills/go-public/SKILL.md) | Python, gitleaks | Take a private, personal codebase public: inventory what is general and what is yours, generalize the code with a private overlay so your own setup keeps working, restructure, make setup one command (including one-click MCP install), then a full-history leak check (`publish-check.py`), clean history and the minimal open-source files, and a GitHub watcher (`gh-watch.py`) that pings you about new issues |
@@ -99,7 +100,7 @@ projects.
 ## Tests
 
 ```bash
-node --test skills/subagents/code/*.test.mjs
+node --test skills/subagents/code/*.test.mjs skills/pacing/scripts/*.test.mjs
 bash skills/subagents/code/run.test.sh
 python3 -m pytest skills/message-board/scripts/test_board.py
 ```

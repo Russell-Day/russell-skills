@@ -7,7 +7,7 @@
 // Same labels and env overrides as run.sh (EFFORT, ACCOUNT, JOB, TIMEOUT), plus
 // PROJECT_ROOT to pick the T3 project and NO_SETTLE=1. TITLE="<fix>" names the
 // thread after its fix ("<fix> · <model>") instead of "[<model>] <job>"; the job
-// dir records the thread id, which is how pacer, continuity and prune-workers
+// dir records the thread id, which is how prune-workers and other tools
 // still know it is a worker. PROJECT_ROOT defaults to
 // the git root of the current directory; from a linked worktree it falls back to
 // the main tree, since T3 projects are registered there.
@@ -15,7 +15,7 @@
 //   node t3-thread.mjs --rename "<title>" [--thread <id>]
 //
 // renames the thread the caller runs in (found from its Claude Code or Codex
-// session, as continuity.mjs does), or --thread.
+// session), or --thread.
 //
 //   node t3-thread.mjs --orchestrator "<title>" <brief-file> [--model opus] [--effort high]
 //
@@ -188,8 +188,8 @@ fs.copyFileSync(promptSrc, path.join(job, "prompt.md"));
 fs.appendFileSync(path.join(job, "prompt.md"), "\n\n" + fs.readFileSync(path.join(here, "worker-communication.md"), "utf8"));
 const prompt = fs.readFileSync(path.join(job, "prompt.md"), "utf8");
 const log = (...a) => fs.appendFileSync(path.join(job, "run.log"), `${new Date().toISOString()} ${a.join(" ")}\n`);
-// The thread that started this job, so the pacer counts a working worker and its
-// parent once. Every run rewrites it with its caller; a run from outside T3 writes nothing.
+// The thread that started this job, so a tool counting working threads counts a
+// worker and its parent once. Every run rewrites it with its caller; a run from outside T3 writes nothing.
 try { const parent = currentThread(); if (parent) fs.writeFileSync(path.join(job, "parent_thread_id"), `${parent}\n`); }
 catch (e) { log("parent thread:", e.message); }
 

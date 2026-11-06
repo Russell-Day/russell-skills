@@ -18,7 +18,7 @@ Skipped or deferred: `<id>` <why>.
    **Pros / cons:** … **Other options:** … — working guess until answered: <X>
 
 ## Resume
-What a thread woken by the pacer reads first. Update it before `enqueue` and `pause`.
+What a fresh thread on this plan reads first. Keep it current before you stop.
 - **Stages:** S1 committed <sha>; S2 review r1 (<thread>); S3 planned.
 - **Decisions:** <the ones above that change what the next stage does>
 - **Next step:** <exact next action, e.g. "dispatch S3 with /tmp/<plan>/s3.md">

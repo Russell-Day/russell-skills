@@ -24,7 +24,7 @@ test("dispatcher: TITLE becomes the worker thread's title in thread.create", () 
   assert.equal(fs.readFileSync(path.join(f.home, "jobs/p99-impl/thread_id"), "utf8"), created.threadId);
 });
 
-// The caller's T3 thread goes into parent_thread_id, so the pacer counts a working
+// The caller's T3 thread goes into parent_thread_id, so a counter of working threads counts a
 // worker and its parent once.
 test("dispatcher: the caller's thread is recorded in parent_thread_id, every run rewrites it, none outside T3", () => {
   const f = fakeHome();

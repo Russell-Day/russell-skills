@@ -9,13 +9,13 @@ The lead loop for finishing a list of items with delegated workers the user
 can watch. Workers are T3 threads from [subagents](../subagents/SKILL.md),
 never the harness's built-in Agent/Explore subagents (those vanish with their
 context). Model routing, account pools, quota checks, the shape (lead writes
-vs workers) and the hard rules live in the subagents skill; queueing, pausing,
-waiting and hand-off live in the pacer skill when one is installed. This skill
-is only the loop. A project's own rules (`AGENTS.md`, a project copy of a
-skill) win over anything here.
+vs workers) and the hard rules live in the subagents skill; how much to start
+at once lives in the [pacing](../pacing/SKILL.md) skill. This skill is only the
+loop. A project's own rules (`AGENTS.md`, a project copy of a skill) win over
+anything here. Read `local.md` next to this file first if it exists.
 
 ```
-intake → stages → plan file → questions (if any) → Resume + enqueue (pacer)
+intake → stages → plan file → questions (if any) → Resume
 → mark started → dispatch → wait → review → fix loop → commit → mark done → report
 ```
 
@@ -39,9 +39,8 @@ The user reads only the last line of a turn, so:
 - `S=~/.agents/skills/subagents/code` (or the project's copy, e.g.
   `.agents/skills/subagents/code`).
 - No worker budget: dispatch every ready stage that shares no files with a
-  running one. With the pacer installed, the one brake: before each Claude
-  Opus worker read `pacer.mjs status`; at or over its `Working N/cap`, start
-  one at most.
+  running one. The one brake: before each Claude Opus worker check
+  `pace.mjs` (pacing skill); over pace, start one at most.
 - Pick a plan slug `<plan>` (e.g. `62-improvements-round`) and a job prefix
   (`p62-`); every JOB, prompt file and index path uses it.
 
@@ -83,10 +82,7 @@ for its owner) and put the same blocks in the
 plan. Stages that don't depend on an answer go ahead, with a working guess
 recorded for the rest; "go with the guess" makes it the decision.
 
-Once answered, fill Resume. With the pacer skill installed, follow its "Day
-protocol" (enqueue or ready, priority and size, over pace, asleep) and "How to
-wait". Without it, start building right away; to wait for a known time, use a
-session-continuity skill's `nudge` if one is installed.
+Once answered, fill Resume and start building.
 
 ## 5. Dispatch
 
@@ -118,7 +114,7 @@ review JOB.
 
 End the turn and let the report wake you: a `delegate_task` child wakes you
 on completion; a shell launch runs as a harness background task. No sleep
-loops or pollers (pacer skill, "How to wait", for the full rule).
+loops or pollers.
 
 When woken, read the job directory (`~/.local/state/agent-jobs/<JOB>/`, or
 the project copy's job root): `exit_code`, then `report.md`. A `CONTINUE` turn
@@ -250,9 +246,8 @@ copies never get a venv copy, symlink, `uv` or `pip`; an agent started in a
 copy auto-loads its `.mcp.json`, so repo MCP servers launch with the venv's
 python, never `uv run`.
 
-A lead at 3+ compactions hands off through the pacer (pacer skill, "Day
-protocol"); without one, make Resume current and start a fresh thread on the
-plan file, then stop. Workers and reviewers continued with `CONTINUE=1` (and
+A lead at 3+ compactions makes Resume current, starts a fresh thread on the
+plan file, then stops. Workers and reviewers continued with `CONTINUE=1` (and
 `PLAN=<plan.md>`) move to a fresh thread on their own.
 
 ## 11. Mark done and report
@@ -274,10 +269,7 @@ Final report: stage table (items, sha, verdict), live vs needs a restart,
 deferred items with reasons, quota used, efficiency hints posted, and the
 `Did · Result · Errors · Tooling idea · Tests` block last. If the repo has a
 channel post script, post one line there (`<what shipped> · tests
-<pass/fail> · errors <none or what>`). Then, if the
-session-continuity skill is installed, `node
-~/.agents/skills/session-continuity/scripts/continuity.mjs settle`, only when
-nothing waits on the user; otherwise leave the thread open.
+<pass/fail> · errors <none or what>`).
 
 ## Source adapters
 

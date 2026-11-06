@@ -19,7 +19,7 @@
 # and prints that directory. Exit code 0 is not acceptance: read report.md.
 set -euo pipefail
 # A headless run is not a T3 thread: don't hand it the caller's session ids, or
-# continuity.mjs would resolve them to the caller's thread (a reviewer settled its orchestrator).
+# tools that find "my thread" from them would act on the caller's thread instead.
 unset CLAUDE_CODE_SESSION_ID CODEX_THREAD_ID CODEX_SESSION_ID
 
 usage() { sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
