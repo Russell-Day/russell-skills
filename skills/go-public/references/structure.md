@@ -13,9 +13,11 @@ Cursor and others):
 repo/
 ├── README.md                 # the map
 ├── LICENSE
+├── install.sh                # only if a plain copy or plugin install isn't enough
+├── .github/                  # CI, issue forms, SECURITY.md, repo config
 ├── .claude-plugin/
 │   └── marketplace.json      # optional: `/plugin marketplace add owner/repo`
-└── skills/                   # or top-level dirs if there are only a few
+└── skills/                   # every skill here, even when there are only a few
     └── <skill-name>/         # dir name == frontmatter `name`, [a-z0-9-]
         ├── SKILL.md          # frontmatter + instructions, < ~300 lines
         ├── scripts/          # code the agent runs
@@ -23,6 +25,9 @@ repo/
         └── assets/           # templates, schemas
 ```
 
+- Keep the root this small: a visitor should see `skills/`, README and LICENSE,
+  not config files. Per-skill config (examples, local overlays) lives in the
+  skill's folder; repo config goes in `.github/`.
 - Frontmatter: `name` (matches the dir), `description` (≤ 1024 chars: what it does
   and when to use it, with trigger words), plus optional `license` and
   `compatibility` (required tools). Validate with `skills-ref validate` if it is

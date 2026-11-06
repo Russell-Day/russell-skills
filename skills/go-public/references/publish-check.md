@@ -51,7 +51,7 @@ only the generic patterns run, and the report says so.
 
 Show the report grouped as it prints. For each REVIEW, decide together: intended
 (e.g. a fake phone number in a design example, a test fixture log) or a leak. Intended
-hits go in `.publish-check-ignore` at the repo root, so the next run is quiet:
+hits go in `.publish-check-ignore` at the repo root (or `.github/publish-check-ignore`, to keep the root clean), so the next run is quiet:
 
 ```
 path:docs/examples/*          # skip these paths in the personal/email scans; data, binary

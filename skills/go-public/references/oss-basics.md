@@ -2,8 +2,7 @@
 
 Add only what the repo needs. A solo repo is complete with a LICENSE, a README, a
 SECURITY.md and issue forms. Add CONTRIBUTING only if you want contributions, and a
-Code of Conduct only if you expect a community. For a full kit, `library/oss-launch`
-has templates per stack.
+Code of Conduct only if you expect a community.
 
 ## LICENSE
 

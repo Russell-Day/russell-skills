@@ -1,8 +1,8 @@
-# publish-check allowlist (see go-public/references/publish-check.md)
-path:go-public/personal.example.txt
+# publish-check allowlist (see skills/go-public/references/publish-check.md)
+path:skills/go-public/personal.example.txt
 path:library/oss-launch/example/*
 path:library/oss-launch/demo/*
-path:go-public/coupling.example.txt
+path:skills/go-public/coupling.example.txt
 allow:/home/me/
 allow:C:\Users\me
 allow:you@school.edu
@@ -12,5 +12,6 @@ allow:you@gmail.com
 # library AGENTS.md files are the upstream skills' compiled rules
 allow:russday@umich.edu
 allow:+1 (312) 847-1928
+path:skills/subagents/code/testdata/*
 path:subagents/code/testdata/*
 path:library/*/AGENTS.md

@@ -50,8 +50,8 @@ has a 5-hour session window, a weekly window, or both, and a pool can span
 several accounts.
 
 **Read `accounts.local.md` for this machine's accounts and capacity** before
-choosing a pool or starting a fan-out. It sits at the root of this skills repo
-(the parent of this skill's directory).
+choosing a pool or starting a fan-out. It sits in this skill's directory,
+next to `accounts.example.md`.
 The scripts read account names, config homes and T3 profiles from
 `accounts.local.json` there, or from `accounts.example.json` if it's missing.
 

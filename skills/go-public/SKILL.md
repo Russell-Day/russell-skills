@@ -40,6 +40,11 @@ for this skill: notify command, defaults, where your private repo is). Read
   a skill, `*.local.json` / `.env` config, an adapter in your private repo) that the
   code reads when it is present. After every phase **your own setup still works**:
   run it. Never fork into a "public copy" that drifts.
+- **Public text never mentions the private side.** No private skill or tool
+  names, no "with my X installed", no "lives in a separate private repo", no
+  "works without it" notes. A personal step a public skill needs goes into the
+  overlay (`local.md`), and the public text only says to read `local.md` if it
+  exists.
 - **Bias toward deletion.** A thing that only you use, that would take real work to
   generalize, stays private or goes. A smaller repo is easier to explain and maintain.
 - **Name the stranger.** Every "is this clear?" question is asked for the target
@@ -113,7 +118,7 @@ Follow [references/setup.md](references/setup.md):
 1. `scripts/publish-check.py <repo>`. The fix walkthrough is [references/publish-check.md](references/publish-check.md).
 2. **Read-through** of everything that would go public, then **triage with the user**: each BLOCK and REVIEW is fixed, removed, or allowed in `.publish-check-ignore`.
 3. **Fix the files**, then **clean the history**: a fresh single-commit history in a new repo (the default for personal repos) or `git filter-repo` in a temporary mirror.
-4. **Minimal OSS files** from [references/oss-basics.md](references/oss-basics.md): LICENSE, SECURITY.md, issue forms, and SUPPORT.md if issues are on. (For a full contributor kit, the library's `oss-launch` has templates.)
+4. **Minimal OSS files** from [references/oss-basics.md](references/oss-basics.md): LICENSE, SECURITY.md, issue forms, and SUPPORT.md if issues are on.
 5. Recheck until **GO**, show the user the result, and only on an explicit **yes** create or flip the public repo and lock it down (commands in publish-check.md step 6).
 
 ## Phase 6: Maintain
