@@ -5,6 +5,7 @@
 //   code/usage.mjs          table
 //   code/usage.mjs --json   raw windows per account
 //   code/usage.mjs --cached skip the refresh and show T3's last probe
+//   code/usage.mjs --no-agy skip AGY (it reads AGY's saved Google login and asks Google)
 //   code/usage.mjs --pick-codex gpt-6-sol [--exclude personal]   Codex account to use
 //
 // Codex/Claude come from T3's internal RPC (server.refreshProviders + getConfig);
@@ -106,10 +107,12 @@ async function agyUsage() {
     resetCredits: 0,
   };
 }
-try {
-  accounts.push(await agyUsage());
-} catch (err) {
-  console.error(`antigravity: could not read limits (${err.message})`);
+if (!process.argv.includes("--no-agy")) {
+  try {
+    accounts.push(await agyUsage());
+  } catch (err) {
+    console.error(`antigravity: could not read limits (${err.message})`);
+  }
 }
 
 if (process.argv.includes("--json")) {

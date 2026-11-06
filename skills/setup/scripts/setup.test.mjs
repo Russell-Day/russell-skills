@@ -117,6 +117,17 @@ test("Codex account names stay unique", () => {
   assert.deepEqual(json.codex.accounts.find((a) => a.t3Instance === "codex").name, "main");
 });
 
+test("a fallback name that clashes too still ends up unique", () => {
+  const home = fakeHome({
+    codex_x: { driver: "codex", enabled: true, config: {} },
+    codex_codexx: { driver: "codex", enabled: true, config: {} },
+    codexx: { driver: "codex", enabled: true, config: {} },
+    claudeAgent: { driver: "claudeAgent", enabled: true, config: {} },
+  });
+  const names = JSON.parse(run(home, "draft", "--json", "--no-usage")).json.codex.accounts.map((a) => a.name);
+  assert.equal(new Set(names).size, 3, names.join(","));
+});
+
 test("install.sh keeps links and folders it doesn't own", () => {
   const home = fakeHome(null);
   const other = fs.mkdtempSync(path.join(os.tmpdir(), "other-skill-"));
