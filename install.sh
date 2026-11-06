@@ -24,16 +24,25 @@ if [[ ${1:-} == --only ]]; then
   done
 fi
 wanted() { local w; for w in "${want[@]}"; do [[ $w == "$1" ]] && return 0; done; return 1; }
+# Ours: missing, or a link into this clone (any path under it, so links from an
+# older layout count too). Anything else (another skill, a real folder) is kept.
+ours() { [[ ! -e $1 && ! -L $1 ]] || { [[ -L $1 ]] && [[ $(readlink "$1") == "$here"/* || $(readlink "$1") == "$2" ]]; }; }
 
 mkdir -p "$HOME/.agents/skills"
 for name in "${all[@]}"; do
   link=$HOME/.agents/skills/$name
   if wanted "$name"; then
+    if ! ours "$link" "$here/skills/$name"; then
+      echo "kept ~/.agents/skills/$name: it isn't a link into this clone. Remove it to use this one." >&2
+      continue
+    fi
     ln -sfn "$here/skills/$name" "$link"
     echo "linked ~/.agents/skills/$name"
     for t in "${targets[@]}"; do
       mkdir -p "$t"
-      ln -sfn "$link" "$t/$name"
+      if ours "$t/$name" "$link"; then ln -sfn "$link" "$t/$name"
+      else echo "kept ${t/#$HOME/\~}/$name: it isn't a link to ~/.agents/skills/$name." >&2
+      fi
     done
   elif [[ -L $link && $(readlink "$link") == "$here/skills/$name" ]]; then
     for t in "${targets[@]}"; do

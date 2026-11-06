@@ -62,6 +62,9 @@ Ask before you run this step. Tell them what it reads:
   compaction window. It skips API keys, passwords and launch arguments.
 - From T3, each account's plan name and its usage-limit windows, such as the
   5-hour session and the weekly limit.
+- If Antigravity (`agy`) is signed in, its Gemini quota. The usage script uses
+  the saved Google login to ask Google's quota service, and may refresh that
+  login. Ask about this part on its own.
 
 Then run `setup.mjs detect`. It shows the plans and limits only while T3 Code
 is running. If T3 isn't running, ask them to start it, or run
@@ -69,7 +72,11 @@ is running. If T3 isn't running, ask them to start it, or run
 
 ## 4. Write the account files
 
-Run `setup.mjs draft` and show the result. Then ask about each choice it made:
+Run `setup.mjs draft` and show the result. A line that starts with `PROBLEM`
+means T3 has no Claude or no Codex account turned on. Ask the person to turn
+one on in T3 Code, then run `draft` again. Until then, `--write` refuses.
+
+Then ask about each choice the draft made:
 
 - **The Claude account for the lead agent** (`claude.t3Instance`) and the one
   for workers (`claude.t3WorkerInstance`). A worker profile with a smaller
@@ -104,16 +111,18 @@ Offer these one at a time, and skip the ones that don't apply:
 
 ## 6. Check that it works
 
-Run the checks for the skills they kept:
+Run the checks for the skills they kept, and skip the rest:
 
 ```bash
-node ~/.agents/skills/subagents/code/usage.mjs   # plans and limits for each account
-node ~/.agents/skills/pacing/scripts/pace.mjs    # whether the 5-hour window is on pace
+node ~/.agents/skills/subagents/code/usage.mjs   # subagents: plans and limits for each account
+node ~/.agents/skills/pacing/scripts/pace.mjs    # pacing: whether the 5-hour window is on pace
+python3 ~/.agents/skills/message-board/scripts/board.py --help   # message-board
 ```
 
-Then tell them to start a new agent session, so the new skills load, and to
-ask "Using the subagents skill, which model should review a risky change?"
-The answer should name a model from the subagents routing table.
+Then tell them to start a new agent session, so the new skills load. Give
+them one question to try for a skill they kept. With subagents, that is
+"Using the subagents skill, which model should review a risky change?" The
+answer should name a model from the subagents routing table.
 
 End with a short summary: which skills are linked, which accounts the skills
 use, and what is still missing. Tell them they can run this skill again at

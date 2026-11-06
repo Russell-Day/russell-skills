@@ -92,3 +92,41 @@ test("install.sh --only links the picks, setup and subagents, and unlinks the re
   assert.deepEqual(fs.readdirSync(path.join(home, ".claude/skills")).sort(), ["pacing", "setup", "subagents"]);
   assert.match(run(home, "check"), /Skills linked: pacing, setup, subagents/);
 });
+
+test("disabled built-in accounts are a problem, and --write refuses", () => {
+  const home = fakeHome({
+    claudeAgent: { driver: "claudeAgent", enabled: false, config: {} },
+    codex: { driver: "codex", enabled: false, config: {} },
+  });
+  const { problems } = JSON.parse(run(home, "draft", "--json", "--no-usage"));
+  assert.equal(problems.length, 2);
+  assert.match(problems[0], /No Claude account is on in T3 \(off: claudeAgent\)/);
+  assert.throws(() => run(home, "draft", "--write", "--no-usage"), (e) => e.status === 1 && /Not written/.test(e.stdout));
+  assert.ok(!fs.existsSync(path.join(home, "accounts/accounts.local.json")));
+});
+
+test("Codex account names stay unique", () => {
+  const home = fakeHome({
+    codex_main: { driver: "codex", enabled: true, config: { shadowHomePath: "~/.codex_main" } },
+    codex: { driver: "codex", enabled: true, config: {} },
+    claudeAgent: { driver: "claudeAgent", enabled: true, config: {} },
+  });
+  const { json } = JSON.parse(run(home, "draft", "--json", "--no-usage"));
+  const names = json.codex.accounts.map((a) => a.name);
+  assert.equal(new Set(names).size, names.length);
+  assert.deepEqual(json.codex.accounts.find((a) => a.t3Instance === "codex").name, "main");
+});
+
+test("install.sh keeps links and folders it doesn't own", () => {
+  const home = fakeHome(null);
+  const other = fs.mkdtempSync(path.join(os.tmpdir(), "other-skill-"));
+  fs.mkdirSync(path.join(home, ".agents/skills"), { recursive: true });
+  fs.symlinkSync(other, path.join(home, ".agents/skills/pacing"));
+  fs.mkdirSync(path.join(home, ".claude/skills/subagents"), { recursive: true });
+  execFileSync("bash", [install, "--only", "pacing"], { encoding: "utf8", env: { ...process.env, HOME: home }, stdio: ["ignore", "pipe", "pipe"] });
+  assert.equal(fs.readlinkSync(path.join(home, ".agents/skills/pacing")), other);
+  assert.ok(fs.lstatSync(path.join(home, ".claude/skills/subagents")).isDirectory());
+  assert.ok(fs.lstatSync(path.join(home, ".agents/skills/subagents")).isSymbolicLink());
+  execFileSync("bash", [install, "--only", "takeover"], { env: { ...process.env, HOME: home }, stdio: "ignore" });
+  assert.equal(fs.readlinkSync(path.join(home, ".agents/skills/pacing")), other);
+});
