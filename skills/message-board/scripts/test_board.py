@@ -10,7 +10,7 @@ import time
 
 import pytest
 
-# The brief's feedback line comes from this (else the repo's accounts.local.json); pin it for the tests.
+# The brief's feedback line comes from this (else the subagents skill's accounts.local.json); pin it for the tests.
 os.environ['MESSAGE_BOARD_FEEDBACK'] = '`fb add "<text>" --project message-board`'
 BOARD = Path(__file__).with_name('board.py')
 NOTE = '''area: Mail sync

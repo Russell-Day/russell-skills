@@ -20,7 +20,7 @@ Personal list: literal strings, one per line (`re:` prefix for a regex, `#` for
 comments). Default: `personal.local.txt` next to this skill (git-ignored), or
 $GO_PUBLIC_PERSONAL. See `personal.example.txt`.
 
-Repo allowlist `.publish-check-ignore` (optional, at the repo root):
+Repo allowlist `.publish-check-ignore` at the repo root, or `.github/publish-check-ignore` (optional):
   path:<glob>      skip matching paths in the personal/email scans, and count
                    matching data/binary/agent files as reviewed (key and
                    credential files always BLOCK)
@@ -115,9 +115,9 @@ class Report:
 
 
 def load_ignore(repo: Path):
-    globs, allows = [".publish-check-ignore"], []
-    f = repo / ".publish-check-ignore"
-    if f.exists():
+    globs, allows = [".publish-check-ignore", ".github/publish-check-ignore"], []
+    f = next((p for p in (repo / ".publish-check-ignore", repo / ".github" / "publish-check-ignore") if p.exists()), None)
+    if f:
         for line in f.read_text(errors="replace").splitlines():
             line = line.strip()
             if not line or line.startswith("#"):

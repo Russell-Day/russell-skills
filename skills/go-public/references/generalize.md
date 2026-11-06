@@ -111,7 +111,7 @@ What you take out still has to work for you. Patterns, simplest first:
 | `local.md` next to a skill | personal preferences, your tool names, your defaults | git-ignored; the public SKILL.md says "read `local.md` first if it exists" |
 | `*.local.json`, `.env` | values the scripts read | git-ignored, with a committed `*.example.*` fallback the code also reads |
 | command hooks | notifier, uploader, your assistant | `--notify-cmd`, an env var, or a key in local config |
-| private repo | whole personal skills or modules | a sibling repo; public skills mention it as optional ("works without it") |
+| private repo | whole personal skills or modules | a sibling repo the public one never names or links; the steps that tie them together live in the overlay |
 | symlinks | personal skills that reuse public code | the private repo symlinks into the public one, never the other way |
 
 Check at the end: delete or rename the overlay files temporarily and run the

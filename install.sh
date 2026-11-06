@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Link every skill in this repo into each harness's user-level skills directory.
+# Link every skill in skills/ into each harness's user-level skills directory.
 #   ./install.sh
 # ~/.agents/skills is the canonical location; Claude Code and Codex homes link to it.
 # library/ is never linked globally: projects link the library skills they want.
@@ -10,10 +10,9 @@ for d in "$HOME"/.claude_* "$HOME"/.codex "$HOME"/.codex_*; do
   [[ -d $d/skills || -f $d/settings.json || -f $d/config.toml ]] && targets+=("$d/skills")
 done
 mkdir -p "$HOME/.agents/skills"
-for skill in "$here"/*/SKILL.md; do
+for skill in "$here"/skills/*/SKILL.md; do
   name=$(basename "$(dirname "$skill")")
-  [[ $name == library ]] && continue
-  ln -sfn "$here/$name" "$HOME/.agents/skills/$name"
+  ln -sfn "$here/skills/$name" "$HOME/.agents/skills/$name"
   echo "linked ~/.agents/skills/$name"
   for t in "${targets[@]}"; do
     mkdir -p "$t"

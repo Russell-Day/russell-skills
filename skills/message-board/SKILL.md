@@ -89,7 +89,7 @@ Every call writes a `briefs` row. When done, run the `helped` line: the posts
 that helped, or `--none`. Those marks are the measure of whether briefs pay
 for their tokens.
 
-If the board would have helped you more (missing info, a command you wanted, noise), file it the way the brief's last line says. That line comes from `MESSAGE_BOARD_FEEDBACK`, else `messageBoard.feedback` in the repo's `accounts.local.json`; with neither it is left out.
+If the board would have helped you more (missing info, a command you wanted, noise), file it the way the brief's last line says. That line comes from `MESSAGE_BOARD_FEEDBACK`, else `messageBoard.feedback` in the subagents skill's `accounts.local.json`; with neither it is left out.
 
 Tables (stable; other tools, such as a viewer or a weekly review, may read them read-only):
 - `posts(id, sender, recipient, topic, body, created, area, reply_to)`

@@ -306,7 +306,7 @@ orchestrator rather than re-deriving the loop:
 
 1. Copy [templates/orchestrator-SKILL.md](templates/orchestrator-SKILL.md) to
    `<repo>/.agents/skills/<name>-orchestrator/SKILL.md` (project) or
-   `<this skills repo>/<name>/SKILL.md` (general; then run `install.sh` and add
+   `<this skills repo>/skills/<name>/SKILL.md` (general; then run `install.sh` and add
    a README row).
 2. Fill the slots: **source adapter**, **stage rules**, **worker rules**
    (project hard rules, skills to read, test commands), **reviewers** (extra

@@ -166,11 +166,11 @@ SLUG = r'[a-z0-9]+(-[a-z0-9]+)*'
 
 def feedback_line():
     """The brief's last line: where to report a board gap. MESSAGE_BOARD_FEEDBACK, else
-    messageBoard.feedback in the repo's accounts.local.json; with neither the line is left out."""
+    messageBoard.feedback in the subagents skill's accounts.local.json; with neither the line is left out."""
     text = os.environ.get('MESSAGE_BOARD_FEEDBACK')
     if text is None:
         try:
-            cfg = json.loads((Path(__file__).resolve().parents[2] / 'accounts.local.json').read_text())
+            cfg = json.loads((Path(__file__).resolve().parents[2] / 'subagents' / 'accounts.local.json').read_text())
             text = (cfg.get('messageBoard') or {}).get('feedback')
         except (OSError, ValueError):
             text = None

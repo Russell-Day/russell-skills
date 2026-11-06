@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // This machine's account setup: Claude config dir and T3 profiles, Codex
 // accounts (home, T3 instance, reserve flag), extra job roots. Read from $ACCOUNTS_FILE, else
-// accounts.local.json at the repo root, else accounts.example.json.
+// accounts.local.json in this skill's folder, else accounts.example.json.
 //
 //   node accounts.mjs codex-home <name>   absolute CODEX_HOME for an account
 //   node accounts.mjs codex-default       account used when ACCOUNT is unset
@@ -12,7 +12,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const expand = (p) => (p === "~" ? os.homedir() : p.startsWith("~/") ? path.join(os.homedir(), p.slice(2)) : p);
 
 function load() {
