@@ -11,7 +11,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: 22 }
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with: { python-version: "3.12" }
       - run: pip install pytest
       - run: node --test skills/subagents/code/*.test.mjs skills/pacing/scripts/*.test.mjs skills/setup/scripts/*.test.mjs
