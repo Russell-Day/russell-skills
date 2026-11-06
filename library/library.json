@@ -218,6 +218,42 @@
       "license": "Apache-2.0",
       "kind": "has-scripts",
       "status": "available"
+    },
+    {
+      "name": "unslop",
+      "description": "Cut AI tells from any writing: a numbered catalog of patterns (AI vocabulary, filler, hedging, em dashes, inline-header lists, mannered prose, over-compression) with the plain fix for each.",
+      "tags": [
+        "writing",
+        "docs",
+        "prose",
+        "readme"
+      ],
+      "source": {
+        "repo": "https://github.com/backnotprop/pstack",
+        "path": "skills/unslop",
+        "commit": "e388616361ac78eeb2da66c148d882534aca4cb9"
+      },
+      "license": "MIT",
+      "kind": "markdown",
+      "status": "available"
+    },
+    {
+      "name": "technical-writing",
+      "description": "Layered standard for docs, READMEs, RFCs, PR descriptions and commit messages: Diátaxis mode, Google developer style sentences, STE instruction rules, Global English; applies unslop.",
+      "tags": [
+        "writing",
+        "docs",
+        "readme",
+        "pr"
+      ],
+      "source": {
+        "repo": "https://github.com/backnotprop/pstack",
+        "path": "skills/technical-writing",
+        "commit": "e388616361ac78eeb2da66c148d882534aca4cb9"
+      },
+      "license": "MIT",
+      "kind": "markdown",
+      "status": "available"
     }
   ]
 }
