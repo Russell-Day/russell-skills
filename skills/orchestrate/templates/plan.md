@@ -27,3 +27,7 @@ What a fresh thread on this plan reads first. Keep it current before you stop.
 Each stage: worker leaves changes uncommitted and lists its files; <reviewer(s) per the
 Review cadence> review; lead commits on APPROVE (<plain | private index with HEAD check>), one
 stage per commit, then marks items done with the sha.
+
+## Sources
+Each doc, thread, meeting or issue the plan relies on: link and the date read.
+For a project with TEDI sources, from `source_sweep(project, topic, people)`.
