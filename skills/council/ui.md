@@ -97,6 +97,9 @@ by eye.
 
 Show it everywhere the scores go:
 - the final reply, with the image embedded and the legend as text under it;
+- any chat or channel post about the council, with the image attached as a
+  picture (the project's post script or upload), not only its path: the user
+  reads these on a phone and can't open a repo path;
 - the PR description, with images and the legend;
 - the commit body, with the legend lines and the image path.
 
