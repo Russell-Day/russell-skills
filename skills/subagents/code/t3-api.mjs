@@ -471,7 +471,7 @@ export function codexMainSelection(model = "gpt-6.1-sol", effort = "high") {
   return { instanceId, model, options: [{ id: "reasoningEffort", value: effort }, { id: "serviceTier", value: "default" }] };
 }
 
-// `--orchestrator "<title>" <brief-file> [--model opus] [--effort medium]`, options in any order.
+// `--orchestrator "<title>" <brief-file> [--model opus] [--effort high]`, options in any order.
 export function orchestratorArgs(argv) {
   const opts = { model: "opus", effort: "high" };
   const rest = [];
