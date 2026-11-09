@@ -30,6 +30,16 @@ Item <id>: <the user's words>
 Add or extend tests that assert exactly these expectations (not "no exception").
 A test the reviewer can make pass by deleting the feature does not count.
 
+Two habits that catch what reviewers otherwise find by hand:
+- **Import, don't retype.** A value another stage or module defines (a threshold,
+  a port list, a reason string, a definition such as "a rage tap is 3 taps") is
+  imported from where it lives, and a test uses that import, so the two can't drift.
+- **One real run before the packet.** Run the change once on real data, read-only,
+  or on a snapshot copy, and put its output in the packet. If there is too little
+  real data to show the behaviour (one day of usage, an empty table), build a
+  realistic month of it and say so; a feature only ever run on toy fixtures is
+  not done.
+
 ## Rules
 - <project hard rules, copied in: e.g. tests are guarded from model hosts;
   live benches and probes that call a model only with the user's go-ahead>
