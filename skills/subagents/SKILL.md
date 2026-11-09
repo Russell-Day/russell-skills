@@ -357,7 +357,7 @@ as `run.sh`: `EFFORT`, `ACCOUNT`, `JOB`, `TIMEOUT`, `NO_SETTLE`. It opens a
 Then it settles the thread.
 `TITLE="<fix>"` titles the thread after its fix (`[<model>] <fix>`, so workers stand apart from orchestrator threads): what the user gets, in their words, no plan or stage numbers (a leading "Plan 7 S1:" is dropped; `JOB` keeps the stage); the job dir still marks it a worker for the prune scripts.
 `node $S/t3-thread.mjs --rename "<title>"` renames the thread you run in (a lead retitling itself to the fixes it ships).
-`node $S/t3-thread.mjs --orchestrator "<title>" <brief-file> [--model opus] [--effort medium]` starts a MAIN thread (orchestrator profile, not pinned, exact title, the brief as its first message) in this T3 project and prints its id at once. Triage threads use it to start one orchestrator per group of items.
+`node $S/t3-thread.mjs --orchestrator "<title>" <brief-file> [--model opus] [--effort high]` starts a MAIN thread (orchestrator profile, not pinned, exact title, the brief as its first message) in this T3 project and prints its id at once. Triage threads use it to start one orchestrator per group of items.
 
 **Thread upkeep** (optional systemd user timers): `settle-workers.timer`
 settles finished workers every minute, `prune-workers.timer` archives worker
