@@ -143,4 +143,5 @@ Rounds: 4 · passed at 9/10 each
 
 Then give the user a short summary: the score path, the findings you took, the
 ones you turned down and why, and anything still open. A UI council also
-shows the before/after image and its legend (ui.md).
+shows the before/after image and its legend (ui.md), attached as an image
+wherever the summary is posted, never only as a file path.

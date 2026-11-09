@@ -276,7 +276,8 @@ Final report: stage table (items, sha, verdict), live vs needs a restart,
 deferred items with reasons, quota used, efficiency hints posted, and the
 `Did · Result · Errors · Tooling idea · Tests` block last. If the repo has a
 channel post script, post one line there (`<what shipped> · tests
-<pass/fail> · errors <none or what>`).
+<pass/fail> · errors <none or what>`), with the stage's before/after or
+screenshots attached as images (not just their paths) when it changed UI.
 
 ## Source adapters
 
