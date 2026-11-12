@@ -502,3 +502,21 @@ test("reap: the default background check reads a Codex thread's rollout, not a C
   const done = r.candidates.find((c) => c.threadId === "cx-done");
   assert.match(done.backgroundNotChecked, /no rollout \*-n-cx-done\.jsonl|ENOENT|no Codex/);
 });
+
+test("reap on a slow T3: the first detach that times out stops the sweep with one line; the rest wait for the next run", async () => {
+  const sent = [], out = [];
+  const send = async (c) => { sent.push(c); throw Object.assign(new Error("T3 slow: orchestration.dispatchCommand provider-session.detach took over 1.0 s"), { timeout: true }); };
+  const r = await reap({ now: () => NOW, query: v2(tables()), send, log: tmpLog(), background: none, out: (l) => out.push(l) });
+  assert.equal(sent.length, 1, "no further detach after the timeout");
+  assert.deepEqual(out.filter((l) => l.startsWith("stopped: ")), ["stopped: T3 slow: orchestration.dispatchCommand provider-session.detach took over 1.0 s; 4 session(s) left for the next run"]);
+  assert.deepEqual([r.detached.length, r.errors.length], [0, 1]);
+});
+
+test("reap when connecting to T3 times out: one stopped line, nothing sent, every session left for the next run", async () => {
+  const sent = [], out = [];
+  const connect = async () => { throw Object.assign(new Error("T3 slow: connect (token) took over 1.0 s"), { timeout: true }); };
+  const r = await reap({ now: () => NOW, query: v2(tables()), send: async (c) => { sent.push(c); }, connect, log: tmpLog(), background: none, out: (l) => out.push(l) });
+  assert.equal(sent.length, 0);
+  assert.deepEqual(out.filter((l) => l.startsWith("stopped: ")), ["stopped: T3 slow: connect (token) took over 1.0 s; 5 session(s) left for the next run"]);
+  assert.equal(r.errors.length, 1);
+});

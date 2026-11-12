@@ -243,10 +243,11 @@ export async function reap({ idleMin = 5, dryRun = false, now = () => Date.now()
       if (e.notRunning) { out(`${e.message}; nothing to detach`); return result; }
       write(`error connect: ${e.message}`);
       result.errors.push({ threadId: null, error: e.message });
+      if (e.timeout) out(`stopped: ${e.message}; ${candidates.length} session(s) left for the next run`);
       return result;
     }
   }
-  for (const c of candidates) {
+  for (const [i, c] of candidates.entries()) {
     const s = pick().find((x) => x.threadId === c.threadId && x.providerSessionId === c.providerSessionId);
     if (!s) { out(`skipped ${line(c)}: busy or changed since the first read`); continue; }
     try {
@@ -258,12 +259,17 @@ export async function reap({ idleMin = 5, dryRun = false, now = () => Date.now()
       write(`error ${line(s)}: ${e.message}`);
       out(`error ${line(s)}: ${e.message}`);
       result.errors.push({ threadId: s.threadId, error: e.message });
+      // A slow T3 (t3-api's step timeout): stop here, the next sweep takes the rest.
+      if (e.timeout) { out(`stopped: ${e.message}; ${candidates.length - i - 1} session(s) left for the next run`); break; }
     }
   }
   return result;
 }
 
-if (process.argv[1] && fs.realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) await main();
+// Exit at most 1 s after main is done: a socket whose close T3 never answers would keep node
+// alive past a "stopped:" line, and systemd would queue the next run behind it. The grace second
+// lets piped output drain; with nothing left open node ends at once.
+if (process.argv[1] && fs.realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) { await main(); setTimeout(() => process.exit(), 1000).unref(); }
 
 async function main() {
   const args = process.argv.slice(2);

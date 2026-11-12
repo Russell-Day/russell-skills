@@ -17,10 +17,23 @@ const PROTOCOL = 2; // `/ws?orchestrationProtocol=`; the server answers 426 to a
 // systemd user timers get a bare PATH without ~/.local/bin, where the t3 CLI lives.
 process.env.PATH = `${process.env.PATH ?? ""}:${path.join(os.homedir(), ".local/bin")}`;
 
+// How long one T3 step may take before it fails with `timeout: true` ("T3 slow: …"): each
+// WebSocket connect (the token CLI, the ticket fetch and the socket open share it) and each
+// request get T3_API_TIMEOUT_MS (default 30 s), each state DB query T3_QUERY_TIMEOUT_MS
+// (default 60 s). Read on every call, so a script can lower them for one run (prune-workers
+// --settle does). A timer whose run hangs on a slow T3 would otherwise end after the next
+// tick was due, and systemd starts that tick at once, so the passes pile up behind T3.
+export const t3Timeouts = () => ({ api: Number(process.env.T3_API_TIMEOUT_MS) || 30000, query: Number(process.env.T3_QUERY_TIMEOUT_MS) || 60000 });
+const slow = (step, ms) => Object.assign(new Error(`T3 slow: ${step} took over ${(ms / 1000).toFixed(1)} s`), { timeout: true });
+function runFor(step, ms, cmd, args, opts) {
+  try { return execFileSync(cmd, args, { ...opts, timeout: ms, killSignal: "SIGKILL" }); }
+  catch (e) { if (e.code === "ETIMEDOUT") throw slow(step, ms); throw e; }
+}
+
 // Read-only query against T3's state DB; rows come back as plain objects.
 export function t3Query(sql, params = []) {
   const code = `import json,sqlite3,sys\nc=sqlite3.connect('file:'+sys.argv[1]+'?mode=ro',uri=True)\nc.row_factory=sqlite3.Row\nprint(json.dumps([dict(x) for x in c.execute(sys.argv[2],json.loads(sys.argv[3]))]))`;
-  return JSON.parse(execFileSync("python3", ["-c", code, path.join(userdata, "statev2.sqlite"), sql, JSON.stringify(params)], { encoding: "utf8", maxBuffer: 256 * 1024 * 1024 }));
+  return JSON.parse(runFor("state DB query", t3Timeouts().query, "python3", ["-c", code, path.join(userdata, "statev2.sqlite"), sql, JSON.stringify(params)], { encoding: "utf8", maxBuffer: 256 * 1024 * 1024 }));
 }
 
 // The tables and columns this file reads; checkT3 checks they are all there. The projects
@@ -57,19 +70,28 @@ export async function t3Connect(label = "agent skill") {
   try { runtime = JSON.parse(fs.readFileSync(path.join(userdata, "server-runtime.json"), "utf8")); }
   catch (e) { if (e.code === "ENOENT") throw notRunning("no server-runtime.json"); throw e; }
   const base = `http://127.0.0.1:${runtime.port}`;
-  const token = execFileSync("t3", ["auth", "session", "issue", "--token-only", "--ttl", "5m", "--label", label], { encoding: "utf8" }).trim();
+  const budget = t3Timeouts().api, end = Date.now() + budget;
+  const left = () => Math.max(1, end - Date.now());
+  const token = runFor("connect (token)", budget, "t3", ["auth", "session", "issue", "--token-only", "--ttl", "5m", "--label", label], { encoding: "utf8" }).trim();
   let res;
-  try { res = await fetch(`${base}/api/auth/websocket-ticket`, { method: "POST", headers: { authorization: `Bearer ${token}` } }); }
+  try { res = await fetch(`${base}/api/auth/websocket-ticket`, { method: "POST", headers: { authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(left()) }); }
   catch (e) {
+    if (e.name === "TimeoutError") throw slow("connect (ticket)", budget);
     if (e.cause?.code === "ECONNREFUSED") throw notRunning(`connection refused on port ${runtime.port}`);
     throw new Error(`T3 server not reachable on port ${runtime.port}: ${e.cause?.message ?? e.message}`);
   }
   if (res.status === 401 || res.status === 403) throw apiChanged(`websocket ticket: HTTP ${res.status} (the server refused the \`t3 auth session issue\` token; is t3.real on the server's runtime?)`);
   if (!res.ok) throw new Error(`websocket ticket: HTTP ${res.status}`);
-  const { ticket } = await res.json();
+  let ticket;
+  try { ({ ticket } = await res.json()); }
+  catch (e) { if (e.name === "TimeoutError") throw slow("connect (ticket)", budget); throw e; }
   if (!ticket) throw apiChanged("websocket ticket: no ticket in the reply");
   const ws = new WebSocket(`${base.replace(/^http/, "ws")}/ws?orchestrationProtocol=${PROTOCOL}&wsTicket=${encodeURIComponent(ticket)}`);
-  await new Promise((ok, fail) => { ws.onopen = ok; ws.onerror = () => fail(apiChanged(`websocket refused (orchestrationProtocol=${PROTOCOL}; 426 means T3 wants another protocol)`)); });
+  await new Promise((ok, fail) => {
+    const timer = setTimeout(() => { ws.onopen = ws.onerror = null; ws.close(); fail(slow("connect (socket)", budget)); }, left());
+    ws.onopen = () => { clearTimeout(timer); ok(); };
+    ws.onerror = () => { clearTimeout(timer); fail(apiChanged(`websocket refused (orchestrationProtocol=${PROTOCOL}; 426 means T3 wants another protocol)`)); };
+  });
   const pending = new Map();
   let next = 0;
   ws.onmessage = (e) => {
@@ -86,10 +108,10 @@ export async function t3Connect(label = "agent skill") {
   };
   ws.onclose = () => { for (const p of pending.values()) { p.done(); p.fail(new Error(`${p.tag}: connection closed`)); } };
   return {
-    request(tag, payload, { stream = false, timeoutMs = 30000 } = {}) {
+    request(tag, payload, { stream = false, timeoutMs = t3Timeouts().api } = {}) {
       const id = String(++next);
       return new Promise((ok, fail) => {
-        const timer = setTimeout(() => { pending.delete(id); fail(new Error(`${tag}${payload?.type ? ` ${payload.type}` : ""}: timeout`)); }, timeoutMs);
+        const timer = setTimeout(() => { pending.delete(id); fail(slow(`${tag}${payload?.type ? ` ${payload.type}` : ""}`, timeoutMs)); }, timeoutMs);
         pending.set(id, { tag: payload?.type ?? tag, stream, ok, fail, done: () => { clearTimeout(timer); pending.delete(id); } });
         ws.send(JSON.stringify({ _tag: "Request", id, tag, payload, headers: [] }));
       });

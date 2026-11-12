@@ -2,7 +2,7 @@
 // Archive old delegated worker threads so T3's sidebar keeps the orchestrators.
 //
 //   node prune-workers.mjs [--days 5] [--dry-run] [--delete]
-//   node prune-workers.mjs --settle [--min 10] [--dry-run]
+//   node prune-workers.mjs --settle [--min 10] [--timeout-s 15] [--deadline-s 40] [--dry-run]
 //
 // --settle settles delegate_task children (and the provider subagent threads under them, and
 // t3-thread.mjs worker threads a late helper report re-opened) once
@@ -11,7 +11,12 @@
 // T3 never settles them itself, so without this every finished child sat open in
 // the sidebar until the 5-day archive (~900 of them at one point). A later fix round
 // (t3_thread_send) still runs on a settled child. settle-workers.timer runs it with --min 0
-// every minute, so a finished worker leaves T3's Working list within a minute.
+// every minute, so a finished worker leaves T3's Working list within a minute. Each T3 step
+// of a --settle run gets --timeout-s (default 15), and no settle starts after --deadline-s
+// (default 40), so a run ends within --deadline-s plus one settle's steps (under the timer's
+// minute with the defaults): at the first step that takes too long, or at the deadline, it
+// stops with one "stopped: …" line and leaves the rest for the next run. Without that a slow
+// T3 made one run last minutes, and systemd started the next one the moment it ended.
 //
 // A worker thread ("[sol61] job", "[opus] job", or a TITLE fix name whose job dir
 // recorded the thread; see isWorker in t3-api.mjs) is pruned once
@@ -87,7 +92,10 @@ function holds(out = () => {}) {
   };
 }
 
-if (process.argv[1] && fs.realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) await main();
+// Exit at most 1 s after main is done: a socket whose close T3 never answers would keep node
+// alive past a "stopped:" line, and systemd would queue the next run behind it. The grace second
+// lets piped output drain; with nothing left open node ends at once.
+if (process.argv[1] && fs.realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) { await main(); setTimeout(() => process.exit(), 1000).unref(); }
 
 async function main() {
   const args = process.argv.slice(2);
@@ -98,12 +106,26 @@ async function main() {
   if (args.includes("--settle")) {
     const min = Number(option("--min", "10"));
     if (!(min >= 0)) throw new Error("--min must be a number of minutes");
-    const children = settleable(listThreads(), new Date(Date.now() - min * 60000).toISOString(), { held: holds(console.log) });
-    let settled = 0;
-    for (const t of children) {
-      if (dryRun) { console.log(`would settle ${t.id} ${t.title}`); continue; }
-      try { await settleThread(t.id); settled += 1; } catch (e) { console.error(`${t.id} ${t.title}: ${e.message}`); process.exitCode = 1; }
-    }
+    const timeoutMs = Number(option("--timeout-s", "15")) * 1000, deadlineMs = Number(option("--deadline-s", "40")) * 1000;
+    if (!(timeoutMs > 0 && deadlineMs > 0)) throw new Error("--timeout-s and --deadline-s must be positive numbers of seconds");
+    const end = Date.now() + deadlineMs;
+    // Each T3 step gets --timeout-s, or what is left of the run if that is less (t3-api reads these per call).
+    const budget = () => { const ms = String(Math.max(1, Math.min(timeoutMs, end - Date.now()))); process.env.T3_API_TIMEOUT_MS = process.env.T3_QUERY_TIMEOUT_MS = ms; };
+    const stop = (why, left) => { console.error(`stopped: ${why}; ${left} left for the next run`); process.exitCode = 1; };
+    let children = [], settled = 0;
+    try {
+      budget();
+      children = settleable(listThreads(), new Date(Date.now() - min * 60000).toISOString(), { held: holds(console.log) });
+      for (const [i, t] of children.entries()) {
+        if (dryRun) { console.log(`would settle ${t.id} ${t.title}`); continue; }
+        if (Date.now() >= end) { stop(`run reached --deadline-s ${deadlineMs / 1000}`, `${children.length - i} thread(s)`); break; }
+        budget();
+        try { await settleThread(t.id); settled += 1; } catch (e) {
+          if (e.timeout) { stop(e.message, `${children.length - i} thread(s)`); break; }
+          console.error(`${t.id} ${t.title}: ${e.message}`); process.exitCode = 1;
+        }
+      }
+    } catch (e) { if (!e.timeout) throw e; stop(e.message, "every thread"); return; }
     if (children.length) console.log(`${dryRun ? "would settle" : "settled"} ${dryRun ? children.length : settled} finished worker thread(s)`);
     return;
   }

@@ -3,6 +3,7 @@ import "./testdata/use-test-accounts.mjs"; // first: fixed test accounts
 import assert from "node:assert/strict";
 import path from "node:path";
 import test from "node:test";
+import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { isWorker } from "./t3-api.mjs";
 import fs from "node:fs";
@@ -145,4 +146,96 @@ test("--settle --min 0: a finished Codex worker settles within the minute; an op
     agent: "background work pending (agent kid)", missing: "background work not checked: no rollout *-missing.jsonl" });
   const picked = settleable(threads, new Date(now).toISOString(), { now, waiting: () => [], held: (x) => !!backgroundHold(x.id, sessions, background) });
   assert.deepEqual(picked.map((x) => x.title), ["done"]);
+});
+
+// A slow T3: each --settle run stops at its first step over --timeout-s, or at --deadline-s,
+// with one "stopped:" line, so a run never outlasts the timer's minute and no pass queues behind it.
+// FAKE_T3_HANG picks the step that hangs: the token CLI, the ticket fetch, the socket open, or
+// the settle request; "slow" answers each settle after FAKE_T3_SLOW_MS instead.
+const hangPreload = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "t3-hang-")), "hang.mjs");
+fs.writeFileSync(hangPreload, `
+import child from "node:child_process";
+import { syncBuiltinESMExports } from "node:module";
+const mode = process.env.FAKE_T3_HANG;
+if (mode === "token") {
+  const prev = child.execFileSync;
+  child.execFileSync = function (cmd, args = [], opts) { return cmd === "t3" && args[0] === "auth" ? prev.call(this, "sleep", ["30"], opts) : prev.call(this, cmd, args, opts); };
+  syncBuiltinESMExports();
+}
+// A real hung fetch holds its socket open (and the process alive); the interval stands in for it.
+if (mode === "ticket") globalThis.fetch = (url, o) => new Promise((ok, fail) => {
+  const socket = setInterval(() => {}, 1000);
+  o?.signal?.addEventListener("abort", () => { clearInterval(socket); fail(o.signal.reason); });
+});
+if (mode === "socket") globalThis.WebSocket = class { close() {} send() {} };
+if (mode === "request" || mode === "slow") {
+  const Fake = globalThis.WebSocket;
+  globalThis.WebSocket = class extends Fake {
+    send(raw) {
+      if (JSON.parse(raw).payload?.type !== "thread.settle") return super.send(raw);
+      if (mode === "slow") setTimeout(() => super.send(raw), Number(process.env.FAKE_T3_SLOW_MS));
+    }
+    // A real socket whose close T3 never answers keeps node alive; the interval stands in for it.
+    close() { if (mode === "request") setInterval(() => {}, 1000); else super.close(); }
+  };
+}
+`);
+
+const settleHome = () => {
+  const lineage = { parentThreadId: "lead", relationshipToParent: "subagent", rootThreadId: "lead" };
+  const old = ago(30);
+  const ids = ["one", "two", "three"].map((n) => `thread:delegated-task:command%3Aslow%3A${n}`);
+  return { ids, f: fakeHome({
+    threads: ids.map((id) => ({ thread_id: id, title: id.split("%3A").pop(), lineage, created_at: old, updated_at: old })),
+    runs: ids.map((id) => ({ run_id: `${id}:1`, thread_id: id, ordinal: 1, status: "completed", requested_at: old, completed_at: old })),
+  }) };
+};
+// fakeHome.run puts fake-t3 first; the hang preload goes after it so it overrides the fake's pieces.
+const settleRun = (f, mode, args, extra = {}) => {
+  const t0 = Date.now();
+  const r = f.run("--import", [hangPreload, path.join(here, "prune-workers.mjs"), "--settle", "--min", "0", ...args], { FAKE_T3_HANG: mode, ...extra });
+  return { ...r, secs: (Date.now() - t0) / 1000 };
+};
+
+for (const [mode, step] of [["token", "connect \\(token\\)"], ["ticket", "connect \\(ticket\\)"], ["socket", "connect \\(socket\\)"], ["request", "orchestration.dispatchCommand thread.settle"]]) {
+  test(`--settle on a T3 that hangs at ${mode}: stops after --timeout-s with one log line, no retry, rest left for the next run`, () => {
+    const { f } = settleHome();
+    const r = settleRun(f, mode, ["--timeout-s", "1"]);
+    assert.equal(r.status, 1, r.stderr);
+    assert.match(r.stderr, new RegExp(`^stopped: T3 slow: ${step} took over 1\\.0 s; 3 thread\\(s\\) left for the next run$`, "m"));
+    assert.equal(r.stderr.match(/stopped:/g).length, 1);
+    assert.ok(r.secs < 5, `took ${r.secs} s`); // one timeout, not one per thread
+    assert.deepEqual(f.sent("thread.settle"), []);
+  });
+}
+
+test("--settle on a slow but answering T3: the whole run ends by --deadline-s and leaves the rest", () => {
+  const { f } = settleHome();
+  const r = settleRun(f, "slow", ["--timeout-s", "5", "--deadline-s", "1"], { FAKE_T3_SLOW_MS: "700" });
+  assert.equal(r.status, 1, r.stderr);
+  assert.match(r.stderr, /^stopped: .+; [12] thread\(s\) left for the next run$/m);
+  assert.ok(r.secs < 4, `took ${r.secs} s`);
+  assert.ok(f.sent("thread.settle").length >= 1);
+});
+
+test("--settle on a healthy T3 settles every finished child and logs no stop", () => {
+  const { f, ids } = settleHome();
+  const r = settleRun(f, "none", ["--timeout-s", "5"]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.doesNotMatch(r.stderr, /stopped:/);
+  assert.deepEqual(f.sent("thread.settle").map((c) => c.threadId).sort(), [...ids].sort());
+});
+
+test("--settle when T3's state DB query hangs: stops after --timeout-s, nothing settled", () => {
+  // No fake T3 here: the real t3Query runs a python3 that never answers.
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "t3-dbhang-"));
+  const bin = path.join(home, "bin");
+  fs.mkdirSync(bin);
+  fs.writeFileSync(path.join(bin, "python3"), "#!/bin/sh\nexec sleep 30\n", { mode: 0o755 });
+  const t0 = Date.now();
+  const r = spawnSync(process.execPath, [path.join(here, "prune-workers.mjs"), "--settle", "--min", "0", "--timeout-s", "1"],
+    { env: { ...process.env, HOME: home, PATH: `${bin}:${process.env.PATH}` }, encoding: "utf8", timeout: 20000 });
+  assert.equal(r.status, 1, r.stderr);
+  assert.match(r.stderr, /^stopped: T3 slow: state DB query took over 1\.0 s; every thread left for the next run$/m);
+  assert.ok((Date.now() - t0) / 1000 < 5);
 });
