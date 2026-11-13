@@ -325,8 +325,10 @@ export function currentThread(env = process.env, query = t3Query) {
 // Archived projects never count, and a root given through a symlink (a moved repo's old
 // path) is read at its real path.
 export function projectFor(roots, query = t3Query, home = os.homedir()) {
-  const projects = query("select project_id, workspace_root, archived_at from projection_projects where deleted_at is null")
-    .filter((x) => !x.archived_at);
+  let projects;
+  try { projects = query("select project_id, workspace_root, archived_at from projection_projects where deleted_at is null"); }
+  catch { projects = query("select project_id, workspace_root from projection_projects where deleted_at is null"); } // older T3: no archived_at
+  projects = projects.filter((x) => !x.archived_at);
   const real = (p) => { try { return fs.realpathSync(p); } catch { return path.resolve(p); } };
   for (const root of roots) {
     const p = projects.find((x) => path.resolve(x.workspace_root) === path.resolve(root))
