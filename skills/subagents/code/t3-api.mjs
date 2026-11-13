@@ -322,13 +322,18 @@ export function currentThread(env = process.env, query = t3Query) {
 // The T3 project whose workspace root is one of `roots` (first match wins), else the deepest
 // project folder holding the first root (a repo inside a workspace folder: ~/ws/app -> ~/ws).
 // The home folder and / never count as a holder, so a stray repo still errors.
+// Archived projects never count, and a root given through a symlink (a moved repo's old
+// path) is read at its real path.
 export function projectFor(roots, query = t3Query, home = os.homedir()) {
-  const projects = query("select project_id, workspace_root from projection_projects where deleted_at is null");
+  const projects = query("select project_id, workspace_root, archived_at from projection_projects where deleted_at is null")
+    .filter((x) => !x.archived_at);
+  const real = (p) => { try { return fs.realpathSync(p); } catch { return path.resolve(p); } };
   for (const root of roots) {
-    const p = projects.find((x) => path.resolve(x.workspace_root) === path.resolve(root));
+    const p = projects.find((x) => path.resolve(x.workspace_root) === path.resolve(root))
+      ?? projects.find((x) => path.resolve(x.workspace_root) === real(root));
     if (p) return p.project_id;
   }
-  const first = path.resolve(roots[0]);
+  const first = real(roots[0]);
   const holders = projects
     .map((x) => ({ id: x.project_id, dir: path.resolve(x.workspace_root) }))
     .filter((x) => x.dir !== path.resolve(home) && x.dir !== path.parse(x.dir).root && first.startsWith(x.dir + path.sep))

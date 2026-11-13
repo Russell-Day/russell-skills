@@ -81,6 +81,20 @@ test("projectFor: a repo inside a workspace folder falls back to the deepest hol
   assert.throws(() => projectFor(["/home/u/studio-old"], query, "/home/u"), /no T3 project/);
 });
 
+test("projectFor: archived projects never count; an old symlinked root is read at its real path", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pf-"));
+  const ws = path.join(dir, "studio"), app = path.join(ws, "app"), old = path.join(dir, "app_old");
+  fs.mkdirSync(app, { recursive: true });
+  fs.symlinkSync(app, old);
+  const query = () => [
+    { project_id: "p-old", workspace_root: old, archived_at: "2026-11-13" },
+    { project_id: "p-ws", workspace_root: ws, archived_at: null },
+  ];
+  assert.equal(projectFor([old], query, "/nowhere-home"), "p-ws");
+  assert.equal(projectFor([app], query, "/nowhere-home"), "p-ws");
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
 test("createMainThread: create, then first message, never pinned; resume skips what happened; pin only when asked", async () => {
   const sent = [];
   const send = async (c) => { sent.push(c); };
