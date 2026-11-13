@@ -319,13 +319,21 @@ export function currentThread(env = process.env, query = t3Query) {
   return sessionThread("codex", env.CODEX_SESSION_ID ?? env.CODEX_THREAD_ID, query) ?? sessionThread("claudeAgent", env.CLAUDE_CODE_SESSION_ID, query);
 }
 
-// The T3 project whose workspace root is one of `roots` (first match wins).
-export function projectFor(roots, query = t3Query) {
+// The T3 project whose workspace root is one of `roots` (first match wins), else the deepest
+// project folder holding the first root (a repo inside a workspace folder: ~/ws/app -> ~/ws).
+// The home folder and / never count as a holder, so a stray repo still errors.
+export function projectFor(roots, query = t3Query, home = os.homedir()) {
   const projects = query("select project_id, workspace_root from projection_projects where deleted_at is null");
   for (const root of roots) {
     const p = projects.find((x) => path.resolve(x.workspace_root) === path.resolve(root));
     if (p) return p.project_id;
   }
+  const first = path.resolve(roots[0]);
+  const holders = projects
+    .map((x) => ({ id: x.project_id, dir: path.resolve(x.workspace_root) }))
+    .filter((x) => x.dir !== path.resolve(home) && x.dir !== path.parse(x.dir).root && first.startsWith(x.dir + path.sep))
+    .sort((a, b) => b.dir.length - a.dir.length);
+  if (holders.length) return holders[0].id;
   throw new Error(`no T3 project for ${roots[0]}; add it with \`t3 project add\` or set PROJECT_ROOT`);
 }
 

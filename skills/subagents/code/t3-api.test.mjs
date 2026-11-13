@@ -72,6 +72,15 @@ test("projectFor: the first root with a T3 project", () => {
   assert.throws(() => projectFor(["/nowhere"], query), /no T3 project for \/nowhere/);
 });
 
+test("projectFor: a repo inside a workspace folder falls back to the deepest holder, never home", () => {
+  const query = () => [{ project_id: "p-home", workspace_root: "/home/u" }, { project_id: "p-ws", workspace_root: "/home/u/studio" }, { project_id: "p-app", workspace_root: "/home/u/studio/app" }];
+  assert.equal(projectFor(["/home/u/studio/app"], query, "/home/u"), "p-app");
+  assert.equal(projectFor(["/home/u/studio/site", "/home/u/studio/site"], query, "/home/u"), "p-ws");
+  assert.equal(projectFor(["/home/u/studio/site/sub"], query, "/home/u"), "p-ws");
+  assert.throws(() => projectFor(["/home/u/loose-repo"], query, "/home/u"), /no T3 project for \/home\/u\/loose-repo/);
+  assert.throws(() => projectFor(["/home/u/studio-old"], query, "/home/u"), /no T3 project/);
+});
+
 test("createMainThread: create, then first message, never pinned; resume skips what happened; pin only when asked", async () => {
   const sent = [];
   const send = async (c) => { sent.push(c); };
