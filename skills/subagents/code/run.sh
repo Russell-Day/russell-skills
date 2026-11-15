@@ -15,14 +15,15 @@
 #
 #   AGENT_JOBS_DIR=<dir> where job directories go (default: ~/.local/state/agent-jobs)
 #
-# Writes $AGENT_JOBS_DIR/<JOB>/{prompt.md,report.md,run.log,attempts.jsonl,exit_code}
+# Writes $AGENT_JOBS_DIR/<JOB>/{prompt.md,report.md,run.log,attempts.jsonl,exit_code,
+# lead_thread (inside a T3 Code thread)}
 # and prints that directory. Exit code 0 is not acceptance: read report.md.
 set -euo pipefail
 # A headless run is not a T3 thread: don't hand it the caller's session ids, or
 # tools that find "my thread" from them would act on the caller's thread instead.
 unset CLAUDE_CODE_SESSION_ID CODEX_THREAD_ID CODEX_SESSION_ID
 
-usage() { sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+usage() { sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
 [[ $# -eq 2 ]] || usage
 model=$1 prompt_src=$2
 [[ -f $prompt_src ]] || { echo "prompt file not found: $prompt_src" >&2; exit 2; }
@@ -51,6 +52,15 @@ label=$model fallback_from=""
 
 job=${AGENT_JOBS_DIR:-$HOME/.local/state/agent-jobs}/${JOB:-$(date +%Y%m%d-%H%M%S)-$model}
 mkdir -p "$job"
+# The T3 thread that started this helper ("<thread id> <pid> <start time>"), so a sidebar can
+# show that thread as waiting on it while this run.sh lives. Removed first, so a reused job dir
+# never keeps an old one.
+rm -f "$job/lead_thread"
+if [[ -n ${T3CODE_THREAD_ID:-} ]]; then
+  stat_=$(cat "/proc/$$/stat") stat_=${stat_##*) }
+  read -ra stat_ <<<"$stat_"
+  echo "$T3CODE_THREAD_ID $$ ${stat_[19]}" >"$job/lead_thread"
+fi
 cp "$prompt_src" "$job/prompt.md"
 printf '\n\n' >>"$job/prompt.md"
 cat "$(dirname "$0")/worker-communication.md" >>"$job/prompt.md"

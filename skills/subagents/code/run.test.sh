@@ -20,6 +20,7 @@ setup() {
 #!/usr/bin/env bash
 cat >/dev/null
 printf '%s\n' "$@" >"$HOME/claude.args"
+[[ -z ${CLAUDE_SLEEP:-} ]] || { : >"$HOME/claude.started"; sleep "$CLAUDE_SLEEP"; }
 echo "haiku report"
 EOF
   cat >"$bin/agy" <<'EOF'
@@ -196,6 +197,22 @@ check "codex retry: CODEX_HOME per attempt" test "$(cat "$HOME_/codex.homes" | t
 check "codex retry: attempts record each account" test "$(jq_ "$jobs/retry/attempts.jsonl" '[(r["model_label"], r["model_id"], r["effort"], r["account"], r["exit"]) for r in rows]')" \
   = "[('sol61', 'gpt-6.1-sol', 'high', '$first', 1), ('sol61', 'gpt-6.1-sol', 'high', '$second', 0)]"
 check "codex retry: start/end parse, in order" ordered "$jobs/retry/attempts.jsonl"
+
+# Inside a T3 thread run.sh records its lead ("<thread id> <pid> <start>") while it runs, so a
+# sidebar can show that thread as waiting on it; a rerun of the same job outside T3 drops it.
+setup
+launch_as haiku lead1 T3CODE_THREAD_ID=lead-thread-1 CLAUDE_SLEEP=1 & lp=$!
+for _ in $(seq 50); do [[ -e $HOME_/claude.started ]] && break; sleep 0.1; done
+lt="" lpid="" lstart=""; read -r lt lpid lstart <"$jobs/lead1/lead_thread" 2>/dev/null
+check "lead: thread id recorded" test "$lt" = lead-thread-1
+check "lead: pid is the running run.sh, with its start time" python3 -c '
+import sys
+pid, start = sys.argv[1], sys.argv[2]
+f = open(f"/proc/{pid}/stat").read().rsplit(")", 1)[1].split()
+sys.exit(not (f[19] == start and "run.sh" in open(f"/proc/{pid}/cmdline").read()))' "$lpid" "$lstart"
+wait $lp
+launch_as haiku lead1
+check "lead: a rerun outside T3 leaves no lead_thread" test ! -e "$jobs/lead1/lead_thread"
 
 echo "$((n - fails))/$n passed"
 [[ $fails -eq 0 ]]
