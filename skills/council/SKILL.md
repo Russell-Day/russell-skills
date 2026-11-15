@@ -19,7 +19,7 @@ Run it only when asked. Ordinary stage reviews and finals keep following the
 | Member | Model id | `t3-thread.mjs` label | Effort |
 |---|---|---|---|
 | Opus | `claude-opus-5-5` | `opus` | high |
-| Fable | `claude-fable-5-1` | `fable` | high |
+| Fable | `claude-fable-5-2` | `fable` | high |
 | Sol 6.1 | `gpt-6.1-sol` | `sol61` | high (pass `EFFORT=high`; its default is medium) |
 
 If the user names other members, use those instead and keep the same loop,
@@ -127,7 +127,7 @@ Rounds: 4 · passed at 9/10 each
 | Member | R1 | R2 | R3 | R4 | Final |
 |---|---|---|---|---|---|
 | Opus 5.5 (high) | 7 | 9 | — | — | 9 |
-| Fable 5.1 (high) | 6 | — | 8 | 9 | 9 |
+| Fable 5.2 (high) | 6 | — | 8 | 9 | 9 |
 | Sol 6.1 (high) | 7 | — | 9 | — | 9 |
 | Average | 6.7 | — | — | — | 9.0 |
 ```

@@ -61,7 +61,7 @@ test("orchestratorArgs: title and brief, --model/--effort in any order, defaults
 
 test("mainModelSelection: the orchestrator profile, never the worker profile", () => {
   assert.deepEqual(mainModelSelection(), { instanceId: claude.t3Instance, model: "claude-opus-5-5", options: [{ id: "effort", value: "high" }, { id: "fastMode", value: false }] });
-  assert.deepEqual(mainModelSelection("fable", "high"), { instanceId: claude.t3Instance, model: "claude-fable-5-1", options: [{ id: "effort", value: "high" }] });
+  assert.deepEqual(mainModelSelection("fable", "high"), { instanceId: claude.t3Instance, model: "claude-fable-5-2", options: [{ id: "effort", value: "high" }] });
   assert.notEqual(mainModelSelection().instanceId, claude.t3WorkerInstance);
   assert.throws(() => mainModelSelection("gpt"), /--model is/);
 });

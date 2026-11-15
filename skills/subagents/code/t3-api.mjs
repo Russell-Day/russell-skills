@@ -493,7 +493,7 @@ export async function detachSession(threadId, providerSessionId, reason, send = 
 // --- Main threads --------------------------------------------------------------------------
 
 // Claude models a main (orchestrator) thread can run, on the orchestrator profile.
-const mainModels = { opus: "claude-opus-5-5", fable: "claude-fable-5-1", sonnet: "claude-sonnet-5-5", haiku: "claude-haiku-5-5" };
+const mainModels = { opus: "claude-opus-5-5", fable: "claude-fable-5-2", sonnet: "claude-sonnet-5-5", haiku: "claude-haiku-5-5" };
 export function mainModelSelection(model = "opus", effort = "high") {
   const id = mainModels[model];
   if (!id) throw new Error(`--model is ${Object.keys(mainModels).join(", ")}`);

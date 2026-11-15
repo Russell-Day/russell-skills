@@ -163,7 +163,7 @@ function selection(label) {
     case "terra61": return codex("gpt-6.1-terra", "high"); // every stage review; finals are sol61 alone
     case "luna": return codex("gpt-6-luna", "xhigh");
     case "astra": return codex("gpt-6-astra", "low"); // EFFORT=medium for final checks
-    case "fable": return claude("claude-fable-5-1", []);
+    case "fable": return claude("claude-fable-5-2", []);
     case "opus": return claude("claude-opus-5-5", [{ id: "fastMode", value: false }]);
     case "sonnet": return claude("claude-sonnet-5-5", [], "high");
     case "haiku": return claude("claude-haiku-5-5", [], "high");
@@ -216,9 +216,12 @@ if (model === "gemini-flash") {
 // The label and Codex account of the selection a thread really runs on: an attached or
 // continued thread keeps its own model, whatever label and ACCOUNT the CLI was given.
 const labelFor = (id) => ({ "gpt-6-sol": "sol", "gpt-6.1-sol": "sol61", "gpt-6.1-terra": "terra61", "gpt-6-luna": "luna", "gpt-6-astra": "astra",
-  "claude-fable-5-1": "fable", "claude-opus-5-5": "opus", "claude-sonnet-5-5": "sonnet", "claude-haiku-5-5": "haiku" })[id]
+  "claude-fable-5-2": "fable", "claude-fable-5-1": "fable", "claude-opus-5-5": "opus", "claude-sonnet-5-5": "sonnet", "claude-haiku-5-5": "haiku" })[id]
   ?? (/^gemini-3\.8-flash-/.test(id) ? "gemini-flash" : null);
 const codexAccountOf = (instanceId) => codexByInstance(instanceId)?.name ?? null;
+// A retired model id a continued or handed-off thread still carries, and the id it moves to.
+const RETIRED = { "claude-fable-5-1": "claude-fable-5-2" };
+const current = (sel) => RETIRED[sel?.model] ? { ...sel, model: RETIRED[sel.model] } : sel;
 function adopt(sel) {
   modelSelection = sel;
   label = labelFor(sel.model) ?? label;
@@ -362,7 +365,7 @@ async function runThread(attempt) {
       const title = !process.env.TITLE && snap.title ? snap.title : null;
       handoff = { from: attach, n, title,
         text: `You take over from thread ${attach}; its last report is ${path.join(job, "report.md")}.${process.env.PLAN ? `\nPLAN: ${process.env.PLAN}` : ""}\n\n${prompt}` };
-      if (snap.modelSelection && !process.env.EFFORT) adopt(snap.modelSelection);
+      if (snap.modelSelection && !process.env.EFFORT) adopt(current(snap.modelSelection));
       if (modelSelection.instanceId === claudeAccount.t3Instance) modelSelection = { ...modelSelection, instanceId: claudeAccount.t3WorkerInstance };
       attach = undefined;
       snap = undefined;
@@ -375,7 +378,7 @@ async function runThread(attempt) {
   if (snap) {
     priorRunId = snap.latestRunId;
     // Keep the thread's own model and effort unless EFFORT overrides it.
-    if (snap.modelSelection && !process.env.EFFORT) modelSelection = snap.modelSelection;
+    if (snap.modelSelection && !process.env.EFFORT) modelSelection = current(snap.modelSelection);
     // Older workers used the orchestrator profile; move them on continuation
     // while retaining their exact model and options. T3 preserves the resume cursor.
     if (modelSelection.instanceId === claudeAccount.t3Instance) {
@@ -438,7 +441,7 @@ for (let attempt = 1; attempt <= 3; attempt++) {
   if (isCodex && autoAccount) {
     tried.push(codexName);
     try { modelSelection = selection(model); } catch (e) { console.error(e.message); break; }
-  } else if (modelSelection.model === "claude-fable-5-1") {
+  } else if (modelSelection.model?.startsWith("claude-fable-")) {
     fallbackFrom = label;
     label = "opus";
     modelSelection = selection("opus");

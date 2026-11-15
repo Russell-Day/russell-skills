@@ -105,7 +105,7 @@ Scores are 0–10, higher is better, except **Cost**, where higher means scarcer
 |---|---|---|---:|---:|---:|---:|---:|---:|
 | `terra61` | `gpt-6.1-terra` (Codex) | **high**, every review and recheck | – | – | – | 9 | – | 5 |
 | `sol61` | `gpt-6.1-sol` (Codex) | **high, final reviews only** (alone) | 5 | 5 | 7 | 9 | 8 | 5 |
-| `fable` | `claude-fable-5-1` (Claude) | med | 10 | 8 | 8 | 8 | – | 5 |
+| `fable` | `claude-fable-5-2` (Claude) | med | 10 | 8 | 8 | 8 | – | 5 |
 | `opus` | `claude-opus-5-5` (Claude) | high (workers and leads) | 7 | 9 | 9 | 8 | – | 3 |
 | `haiku` | `claude-haiku-5-5` (Claude) | high | 2 | – | 4 | – | 7 | 1 |
 | `sonnet` | `claude-sonnet-5-5` (Claude) | not routed (Haiku does its helper and explorer work) | 3 | 6 | 6 | 3 | 8 | 2 |

@@ -40,7 +40,7 @@ case $model in
   terra61)      harness=codex  id=gpt-6.1-terra      effort=${EFFORT:-high} ;;
   luna)         harness=codex  id=gpt-6-luna         effort=${EFFORT:-xhigh} ;;
   astra)        harness=codex  id=gpt-6-astra        effort=${EFFORT:-low} ;;   # EFFORT=medium for final checks
-  fable)        harness=claude id=claude-fable-5-1   effort=${EFFORT:-medium} ;;
+  fable)        harness=claude id=claude-fable-5-2   effort=${EFFORT:-medium} ;;
   opus)         harness=claude id=claude-opus-5-5    effort=${EFFORT:-high} ;;
   sonnet)       harness=claude id=claude-sonnet-5-5  effort=${EFFORT:-high} ;;
   haiku)        harness=claude id=claude-haiku-5-5   effort=${EFFORT:-high} ;;
@@ -179,7 +179,7 @@ for attempt in 1 2 3; do
   echo "limit reached on $([[ $harness == codex ]] && echo "$account" || echo "$id") (attempt $attempt)" | tee -a "$job/limits.log" >&2
   if [[ $harness == codex && $auto == 1 ]]; then
     tried=${tried:+$tried,}$account
-  elif [[ $id == claude-fable-5-1 ]]; then
+  elif [[ $id == claude-fable-* ]]; then
     fallback_from=$label label=opus id=claude-opus-5-5; echo "falling back to $id" >&2
   else
     break
