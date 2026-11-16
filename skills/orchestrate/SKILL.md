@@ -73,6 +73,16 @@ the user's decisions, open questions, the commit rule, and a **Resume**
 section (stage status, decisions, next step, open risks). Keep the status
 column and Resume current: the lead, the user and a woken thread read them.
 
+A stage ends in one of two ways, and its Status cell says which:
+- `committed <sha>` (or `done <sha>`): the commit that shipped it, in whichever
+  repo it landed. Stats tools read the sha from the cell, so a commit whose
+  subject doesn't name the plan still counts.
+- `ended <reason>: <why>`, the moment you stop working a stage without a
+  commit. Reasons: `no-work` (nothing needed changing), `dropped` (the user
+  or the lead dropped it), `blocked` (on what), `failed` (what broke),
+  `merged` (into which stage or plan). Write the same words in Resume. A
+  stage left at planned / review / blank counts as "no reason recorded".
+
 Numbered plan folders (`<N>-<slug>`): take the number before writing
 anything, with the repo's allocator if it has one. Without one, create the
 folder at once (`mkdir` without `-p`), then list `planning/<N>-*`: if another

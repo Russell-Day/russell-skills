@@ -5,7 +5,7 @@ Source: <adapter: an issue tracker | <path>/TODO.md | …>. Items read <date>.
 
 | Stage | Items | Files owned | Live replay | Model | Reviewer | Status |
 |---|---|---|---|---|---|---|
-| S1 <title> | `<id>` <short>, `<id>` <short> | <dirs/files> | <snapshot, when the stage changes how the live app answers \| —> | opus med | <per Review cadence: terra61 high, or opus high → terra61 high> | planned / dispatched (<thread>) / review / fix r1 / APPROVE / committed <sha> |
+| S1 <title> | `<id>` <short>, `<id>` <short> | <dirs/files> | <snapshot, when the stage changes how the live app answers \| —> | opus med | <per Review cadence: terra61 high, or opus high → terra61 high> | planned / dispatched (<thread>) / review / fix r1 / APPROVE / committed <sha> / ended <no-work\|dropped\|blocked\|failed\|merged>: <why> |
 | S2 <title> | … | … | … | … | … | … |
 
 Skipped or deferred: `<id>` <why>.
@@ -19,7 +19,7 @@ Skipped or deferred: `<id>` <why>.
 
 ## Resume
 What a fresh thread on this plan reads first. Keep it current before you stop.
-- **Stages:** S1 committed <sha>; S2 review r1 (<thread>); S3 planned.
+- **Stages:** S1 committed <sha>; S2 review r1 (<thread>); S3 ended dropped: <why>; S4 planned.
 - **Decisions:** <the ones above that change what the next stage does>
 - **Next step:** <exact next action, e.g. "dispatch S3 with /tmp/<plan>/s3.md">
 - **Open risks:** <what could go wrong, what to check first>
