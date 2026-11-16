@@ -213,7 +213,8 @@ naming only the open finding ids.
 **Budget** (adapted from t3dotgg's sol-loop): Codex rounds are the scarcest spend.
 - **3 review rounds per stage** (review + rechecks). Up to **5** only while a
   blocker with evidence stays open on security, permissions, auth, data loss
-  or state/concurrency. Every recheck sent is a round. An optional Opus
+  or state/concurrency. Every recheck sent is a round, whatever its brief
+  says (`t3-thread.mjs` counts and stops them). An optional Opus
   pre-review loop (a project's Review cadence) has no cap: it runs until it
   APPROVEs or you close it; the cap applies to the terra61 review after it.
 - **Device-bound stages** (only a real device or another machine can test the

@@ -598,3 +598,32 @@ test("new stage: an opus worker attached under a new JOB still continues its thr
   assert.deepEqual(f.sent("message.dispatch").map((s) => s.threadId), [longThread]);
   assert.ok(!r.stderr.includes("new stage"), r.stderr);
 });
+
+// Review budget (orchestrate §9): each review launch that sends a turn is a round in the job dir's
+// `rounds`; past REVIEW_ROUNDS nothing is sent and the run exits 3. A review is known by its brief,
+// its JOB name or an earlier counted round, so free-form recheck briefs count too.
+test("review budget: rounds 1-3 go (a free-form recheck counts), the 4th sends nothing and exits 3", () => {
+  const f = reviewerHome();
+  fs.writeFileSync(f.prompt, "RECHECK ONLY. F1 open.");
+  ok(f.review("p1"));
+  fs.writeFileSync(f.prompt, "# Stage 2 recheck 2\n\nF1 fixed.");
+  ok(f.review("p1"));
+  ok(f.review("p1"));
+  assert.equal(f.readJob("p1", "rounds"), "3\n");
+  const before = f.sent("message.dispatch").length;
+  const r = f.review("p1");
+  assert.equal(r.status, 3, r.stderr);
+  assert.match(r.stderr, /review budget: round 4 > 3 for p1; nothing sent\..*REVIEW_ROUNDS=5/);
+  assert.equal(f.sent("message.dispatch").length, before, "no turn");
+  assert.equal(f.readJob("p1", "exit_code"), "3\n");
+  assert.ok(ok(f.run({ JOB: "p1", REVIEW_ROUNDS: "5", REPORT_FILE: path.join(f.jobs, "p1", "report.md") }, ["sol61", f.prompt])));
+  assert.equal(f.readJob("p1", "rounds"), "4\n", "REVIEW_ROUNDS=5 allows round 4");
+});
+
+test("review budget: a -review/-final JOB counts with any brief; a worker job doesn't", () => {
+  const f = reviewerHome();
+  fs.writeFileSync(f.prompt, "FINAL REVIEW ONLY (all stages).");
+  for (const job of ["x-final-sol", "x-s1-review", "x-s2-recheck1"]) { ok(f.review(job)); assert.equal(f.readJob(job, "rounds"), "1\n", job); }
+  fs.writeFileSync(f.prompt, "fix finding 2");
+  for (const job of ["x-s1-impl", "x-finalize"]) { ok(f.review(job)); assert.equal(f.readJob(job, "rounds"), "", job); }
+});

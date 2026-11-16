@@ -188,6 +188,39 @@ fs.copyFileSync(promptSrc, path.join(job, "prompt.md"));
 fs.appendFileSync(path.join(job, "prompt.md"), "\n\n" + fs.readFileSync(path.join(here, "worker-communication.md"), "utf8"));
 const prompt = fs.readFileSync(path.join(job, "prompt.md"), "utf8");
 const log = (...a) => fs.appendFileSync(path.join(job, "run.log"), `${new Date().toISOString()} ${a.join(" ")}\n`);
+// Review budget (orchestrate §9): every launch of a review job that sends a turn is a round,
+// counted in the job dir's `rounds`. A review job is one by its brief ("REVIEW ONLY." /
+// "RECHECK ONLY."), its JOB name (`-review`, `-recheck`, `-final`) or an earlier counted round,
+// so a free-form recheck on the same JOB counts too. Past REVIEW_ROUNDS (default 3; 5 for an
+// evidenced security / data-loss / concurrency blocker) nothing is sent and the run exits 3.
+// Opus pre-reviews loop until APPROVE: counted, never capped. A re-poll (ATTACH without
+// CONTINUE) sends nothing, so it is gated only before a limit fallback's send.
+const REVIEW_JOB_RE = /(^|-)(review|recheck|final)(?=-|\d|$)/i;
+const isReview = /^\s*(REVIEW|RECHECK) ONLY\./.test(prompt) || REVIEW_JOB_RE.test(path.basename(job))
+  || fs.existsSync(path.join(job, "rounds"));
+const capped = model !== "opus";
+const maxRounds = Number(process.env.REVIEW_ROUNDS ?? 3);
+if (isReview && !Number.isFinite(maxRounds)) { console.error(`REVIEW_ROUNDS=${process.env.REVIEW_ROUNDS} is not a number`); process.exit(2); }
+let roundCounted = false;
+const nextRound = () => { try { return (Number.parseInt(fs.readFileSync(path.join(job, "rounds"), "utf8"), 10) || 0) + 1; } catch { return 1; } };
+function budgetGate() {
+  if (!isReview || roundCounted || !capped) return;
+  const round = nextRound();
+  if (round <= maxRounds) return;
+  const line = `review budget: round ${round} > ${maxRounds} for ${path.basename(job)}; nothing sent. Fix what you agree with, then commit with every open id disputed (with evidence), stop and ask the user, or write closed.md (orchestrate §9). REVIEW_ROUNDS=5 only for an evidenced security, data-loss or concurrency blocker.`;
+  log(line);
+  console.error(line);
+  fs.writeFileSync(path.join(job, "exit_code"), "3\n");
+  process.exit(3);
+}
+function budgetCount() {
+  if (!isReview || roundCounted) return;
+  const round = nextRound();
+  fs.writeFileSync(path.join(job, "rounds"), `${round}\n`);
+  roundCounted = true;
+  log(`review round ${round}/${capped ? maxRounds : "uncapped"}`);
+}
+if (!(process.env.ATTACH && !process.env.CONTINUE)) budgetGate();
 // The thread that started this job, so a tool counting working threads counts a
 // worker and its parent once. Every run rewrites it with its caller; a run from outside T3 writes nothing.
 try { const parent = currentThread(); if (parent) fs.writeFileSync(path.join(job, "parent_thread_id"), `${parent}\n`); }
@@ -385,8 +418,10 @@ async function runThread(attempt) {
       modelSelection = { ...modelSelection, instanceId: claudeAccount.t3WorkerInstance };
     }
     adopt(modelSelection);
+    budgetGate();
     await sendMessage(threadId, prompt, { mode: "queue", modelSelection, label: `subagent ${path.basename(job)}` });
     sent = true;
+    budgetCount();
     log("continued", threadId);
   } else if (attach) {
     // Re-poll: attempts.jsonl records the thread's own model and account.
@@ -396,11 +431,13 @@ async function runThread(attempt) {
     log("attached", threadId);
   } else {
     // Recorded before the thread exists, so nothing ever sees it as a main thread.
+    budgetGate();
     recordThread(threadId);
     if (handoff && attempt === 1) fs.appendFileSync(path.join(job, "thread_ids_prev"), `${handoff.from}\n`);
     await createThread({ threadId, projectId: project[0], title, modelSelection });
     await sendMessage(threadId, handoff?.text ?? prompt, { mode: "start", modelSelection, label: `subagent ${path.basename(job)}` });
     sent = true;
+    budgetCount();
     log("created", threadId, JSON.stringify(modelSelection));
     if (handoff && attempt === 1) {
       const line = `handoff ${handoff.from}→${threadId} (${handoff.n} compactions)`;

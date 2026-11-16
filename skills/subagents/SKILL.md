@@ -210,8 +210,12 @@ JOB=<lead>-inventory    $S/run.sh gemini-flash /tmp/<lead>-inventory.md
   as closed; a review with neither stays open.
 - **Fill in [review-prompt.md](code/review-prompt.md)** for every stage review;
   it carries the boundary, the probes, the proportion rule and the report format.
-- **Budget:** about 3 rounds per review, 5 for an evidenced blocker
-  (orchestrate §9).
+- **Budget:** 3 rounds per review, 5 for an evidenced blocker
+  (orchestrate §9). `t3-thread.mjs` counts every send on a review job (a
+  `-review` / `-recheck` / `-final` JOB, a REVIEW/RECHECK ONLY brief, or a
+  job dir that already counts rounds) and refuses the 4th unless
+  `REVIEW_ROUNDS=5`. Reviews sent through `delegate_task` have no gate: run
+  them on `t3-thread.mjs`.
 
 Reviews run on `t3-thread.mjs`, so rechecks can continue the reviewer's own
 thread:
