@@ -1,29 +1,37 @@
 ---
 name: council
-description: Run a council, a scored multi-model review by Opus, Fable and Sol 6.1 at high effort, looping until every member scores at least 9/10, then record the rounds and scores in the commit or PR. For UI and design ("UI council", "council the design") members score fresh screenshots against reference apps per category, and the work ends with an annotated before/after image of what changed (ui.md). Use only when the user asks for a council (e.g. "council", "council this", "run the council on the plan"); it never replaces the normal review cadence.
+description: Run a council, a scored multi-model review by Opus and Sol 6.1 at high effort (Fable joins round 1 and the final check on plans, design docs and writing), looping until every member scores at least 9/10, then record the rounds and scores in the commit or PR. For UI and design ("UI council", "council the design") members score fresh screenshots against reference apps per category, and the work ends with an annotated before/after image of what changed (ui.md). Use only when the user asks for a council (e.g. "council", "council this", "run the council on the plan"); it never replaces the normal review cadence.
 ---
 
 # Council
 
-A council is three reviewers from two providers who score the same work out of
-10, round after round, until each one gives it at least **9/10**. Round 1 seats
+A council is reviewers from two providers who score the same work out of 10,
+round after round, until each one gives it at least **9/10**. Round 1 seats
 everyone at once so nobody anchors on anyone else. After that the cheapest
-member goes first and the expensive pair only sees work that already cleared
-it, which saves tokens.
+member goes first and the others only see work that already cleared it, which
+saves tokens.
 
 Run it only when asked. Ordinary stage reviews and finals keep following the
 [subagents](../subagents/SKILL.md) skill's "Review cadence".
 
 ## Members
 
-| Member | Model id | `t3-thread.mjs` label | Effort |
-|---|---|---|---|
-| Opus | `claude-opus-5-5` | `opus` | high |
-| Fable | `claude-fable-5-2` | `fable` | high |
-| Sol 6.1 | `gpt-6.1-sol` | `sol61` | high (pass `EFFORT=high`; its default is medium) |
+| Member | Model id | `t3-thread.mjs` label | Effort | Seated on |
+|---|---|---|---|---|
+| Opus | `claude-opus-5-5` | `opus` | high | every council |
+| Sol 6.1 | `gpt-6.1-sol` | `sol61` | high (pass `EFFORT=high`; its default is medium) | every council |
+| Fable | `claude-fable-5-2` | `fable` | high | plans, design docs and writing: round 1 and the final check only |
 
-If the user names other members, use those instead and keep the same loop,
-cheapest first. Effort is high for every member.
+**Code and UI councils are Opus and Sol 6.1.** On code and screens most of
+Fable's findings repeated Opus's (same model family), while Sol 6.1 caught
+bugs neither Claude model saw; a Fable review also spends its own weekly
+bucket and the Claude 5-hour session Opus shares. On plans, design docs,
+strategy and other writing Fable added ideas the other two didn't, so it sits
+round 1 (blind) and the final check there, and Opus does the rechecks between.
+
+If the user names other members (including "with Fable" on code or UI), use
+those instead and keep the same loop, cheapest first. Effort is high for every
+member.
 
 ## Before round 1
 
@@ -69,8 +77,9 @@ background task and wait for all of them:
 ```bash
 S=~/.agents/skills/subagents/code   # or the repo's own subagents copy
 EFFORT=high JOB=<topic>-council-opus  node $S/t3-thread.mjs opus  /tmp/<topic>-council.md
-EFFORT=high JOB=<topic>-council-fable node $S/t3-thread.mjs fable /tmp/<topic>-council.md
 EFFORT=high JOB=<topic>-council-sol61 node $S/t3-thread.mjs sol61 /tmp/<topic>-council.md
+# plans, design docs, writing only:
+EFFORT=high JOB=<topic>-council-fable node $S/t3-thread.mjs fable /tmp/<topic>-council.md
 ```
 
 The reply lands in `<jobs dir>/<JOB>/report.md` (jobs dir: `$AGENT_JOBS_DIR`,
@@ -84,13 +93,16 @@ so its brief carries the earlier findings and what changed.
 
 ## The loop
 
-1. **Round 1: all three in parallel**, blind. Merge the findings, decide which
-   to take, and fix them.
+1. **Round 1: every seated member in parallel**, blind. Merge the findings,
+   decide which to take, and fix them.
 2. **Opus alone.** Recheck Opus, fix, and repeat until it scores 9 or higher.
-3. **Fable and Sol 6.1 together.** Recheck both in parallel, fix, and repeat
-   until both score 9 or higher. If a fix is big (a new design, not a patch),
-   send it past Opus once more before the pair sees it.
-4. **Done** when every available member's latest score is 9 or higher. There
+3. **Sol 6.1.** Recheck Sol, fix, and repeat until it scores 9 or higher. If a
+   fix is big (a new design, not a patch), send it past Opus once more before
+   Sol sees it.
+4. **Fable final check** (plans, design docs, writing only). Recheck Fable
+   once Opus and Sol are both at 9 or higher. If it scores under 9, fix and
+   recheck Fable until it reaches 9; a big fix goes past Opus first.
+5. **Done** when every available member's latest score is 9 or higher. There
    is no round cap.
 
 A member already at 9 or higher sits out the following rounds, whatever the
@@ -121,20 +133,22 @@ every member run (rechecks too), check that the last line of the job's
 Put this section in the commit body, in the PR description if there is a PR
 (edit the description, never a comment), and in your final reply.
 
+A plan council (a code or UI council has no Fable row):
+
 ```markdown
 ## Council
 Rounds: 4 · passed at 9/10 each
 | Member | R1 | R2 | R3 | R4 | Final |
 |---|---|---|---|---|---|
 | Opus 5.5 (high) | 7 | 9 | — | — | 9 |
-| Fable 5.2 (high) | 6 | — | 8 | 9 | 9 |
 | Sol 6.1 (high) | 7 | — | 9 | — | 9 |
+| Fable 5.2 (high) | 6 | — | — | 9 | 9 |
 | Average | 6.7 | — | — | — | 9.0 |
 ```
 
 - `—` means the member didn't run that round. Final is its latest score.
 - The Average row always gives R1 and Final. Middle rounds get an average only
-  when all three ran.
+  when every seated member ran.
 - A reply with no `SCORE:` line is `no score`. Never guess one. Averages use
   only the scores that exist.
 - An `unavailable` member is left out of the averages, and the header says so:
