@@ -122,6 +122,7 @@ function apply(c) {
   else if (c.type === "thread.unsettle" && t) { t.settled_at = null; t.settled_override = "active"; }
   else if (c.type === "thread.snooze" && t) { t.snoozed_until = c.snoozedUntil; t.snoozed_at = at; }
   else if (c.type === "thread.unsnooze" && t) t.snoozed_until = null;
+  else if (c.type === "provider.switch" && t) t.model_selection_json = JSON.stringify(c.modelSelection);
   else if (c.type === "thread.archive" && t) t.archived_at = at;
   else if (c.type === "thread.delete" && t) t.deleted_at = at;
   else if (c.type === "thread.turn.start") db.messages = [...(db.messages ?? []), { thread_id: c.threadId, message_id: c.message.messageId, role: "user", text: c.message.text, created_at: at }];

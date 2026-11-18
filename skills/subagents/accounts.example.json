@@ -4,6 +4,7 @@
     "claude.configDir": "CLAUDE_CONFIG_DIR for headless Claude workers (run.sh).",
     "claude.t3Instance": "T3 provider instance your Claude orchestrator threads use.",
     "claude.t3WorkerInstance": "T3 instance for Claude workers (a profile with a smaller auto-compact window). Same as t3Instance if you have only one.",
+    "claude.overflow": "Optional second Claude account for the pacer: { \"<main T3 instance>\": \"<overflow T3 instance>\" }. A thread the main account's 5 h limit stops moves to the overflow instance and continues; at the main reset it moves back. Leave out (or {}) to turn it off.",
     "codex.default": "Codex account name used when ACCOUNT is unset.",
     "codex.accounts[].name": "Name you pass as ACCOUNT=<name>.",
     "codex.accounts[].home": "CODEX_HOME for that account (run.sh, and usage.mjs reads models_cache.json there).",

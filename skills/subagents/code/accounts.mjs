@@ -30,6 +30,9 @@ export const claude = {
   configDir: expand(raw.claude.configDir),
   t3Instance: raw.claude.t3Instance,
   t3WorkerInstance: raw.claude.t3WorkerInstance ?? raw.claude.t3Instance,
+  // Overflow account: main-account T3 instance -> the instance of a second Claude account that
+  // carries threads the main account's usage limit stopped, until its reset (pacer). {} = off.
+  overflow: raw.claude.overflow ?? {},
 };
 // Extra dispatcher job roots besides AGENT_JOBS_DIR, e.g. a project's own copy of this skill.
 export const extraJobRoots = (raw.jobRoots ?? []).map(expand);
