@@ -153,3 +153,22 @@ test("0.1.0 log lines: a quoted rate_limit_event in tool output doesn't count", 
     + `[${new Date(AT + 60000).toISOString()}] NTIVE: ${JSON.stringify({ provider: "claudeAgent", event: { payload: { type: "user", text: v2event(AT + 60000, five(0.99)) } } })}\n`);
   assert.equal(latestClaudeWindows(d, NOW).windows.five_hour.utilization, 0.53);
 });
+
+// A line naming its instance, as T3 0.1.x logs it (providerSessionId "provider-session:provider-instance:<id>:…").
+const onInstance = (time, windows, instance) => `[${new Date(time).toISOString()}] NTIVE: ${JSON.stringify({ provider: "claudeAgent", protocol: "claude-agent-sdk.query", kind: "protocol",
+  providerSessionId: `provider-session:provider-instance:${instance}:thread:t1:abc`, event: { direction: "incoming", stage: "decoded", payload: { type: "rate_limit_event", rate_limit_info: { unifiedWindows: windows } } } })}\n`;
+
+test("two Claude accounts: each instance gets its own account's reading, never the other's newer one", () => {
+  const d = tmp();
+  const homes = { claudeAgent_main: "~/.claude_main", claudeAgent_workers: "~/.claude_main", claudeAgent_spare: "~/.claude" };
+  write(d, "events.main.log", onInstance(AT - 60000, five(0.97), "claudeAgent_workers"));
+  write(d, "events.spare.log", onInstance(AT, five(0.12), "claudeAgent_spare"));
+  const latest = latestClaudeWindows(d, NOW, homes);
+  const rows = [...accounts("2026-10-09T15:45:01.000Z").slice(1), { instance: "claudeAgent_spare", plan: "Pro", windows: [], resetCredits: 0 }];
+  const out = applyClaudeLogs(rows, latest, NOW, homes);
+  const pct = (i) => out.find((a) => a.instance === i).windows.find((w) => w.label === "Session").usedPercent;
+  assert.deepEqual([pct("claudeAgent_main"), pct("claudeAgent_workers"), pct("claudeAgent_spare")], [97, 97, 12]);
+  // Sibling: the settings unreadable ({}): one account, the newest reading for all, as before.
+  const all = applyClaudeLogs(accounts("2026-10-09T15:45:01.000Z").slice(1), latestClaudeWindows(d, NOW, {}), NOW, {});
+  assert.deepEqual(all.map((a) => a.windows.find((w) => w.label === "Session").usedPercent), [12, 12]);
+});
