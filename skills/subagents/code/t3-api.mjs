@@ -531,15 +531,69 @@ export async function createThread({ threadId = randomUUID(), projectId, title, 
   return threadId;
 }
 
+// --- Main-thread registry --------------------------------------------------------------------
+
+// Who started each main thread a script made. T3's thread record can't tell a script's thread from
+// one the user opened (both are createdBy "user", creationSource "server"), so the scripts write
+// it down here: one JSON line per created thread, `{"threadId","role","title","at","from"?}`.
+// Roles: `orchestrator` (a lead doing a task), `triage` (a triage pass), `own` (a thread the user
+// started, carried on by a hand-off). `from` is the thread a hand-off continued. A thread
+// with no line was not started by a script. The file sits in the agent-jobs state dir
+// (AGENT_JOBS_DIR, read on every call so a test's temp dir always applies).
+export const MAIN_THREADS_NAME = "main-threads.jsonl";
+export const mainThreadsFile = (env = process.env) => path.join(env.AGENT_JOBS_DIR ?? path.join(os.homedir(), ".local/state/agent-jobs"), MAIN_THREADS_NAME);
+
+// Appends one line. A registry it can't write is a warning on stderr, never an error: the thread
+// still starts (a missing role costs a notification; a thread that fails to start costs the work).
+export function recordMainThread({ threadId, role, title = "", from = null }, { file = mainThreadsFile(), at = new Date().toISOString() } = {}) {
+  const line = { threadId, role, title: title ?? "", at, ...(from ? { from } : {}) };
+  try {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.appendFileSync(file, `${JSON.stringify(line)}\n`);
+    return line;
+  } catch (e) {
+    console.error(`main-thread registry ${file}: ${e.message}; thread ${threadId} (${role}) started without a record`);
+    return null;
+  }
+}
+
+// threadId -> { role, from, title, at }; the last line for a thread wins, unreadable lines are skipped.
+export function mainThreadRoles({ file = mainThreadsFile() } = {}) {
+  const roles = new Map();
+  let text;
+  try { text = fs.readFileSync(file, "utf8"); }
+  catch (e) { if (e.code !== "ENOENT") console.error(`main-thread registry ${file}: ${e.message}`); return roles; }
+  for (const raw of text.split("\n")) {
+    if (!raw.trim()) continue;
+    let r;
+    try { r = JSON.parse(raw); } catch { continue; }
+    if (typeof r?.threadId !== "string" || !r.threadId || typeof r.role !== "string" || !r.role) continue;
+    roles.set(r.threadId, { role: r.role, from: r.from ?? null, title: r.title ?? "", at: r.at ?? null });
+  }
+  return roles;
+}
+
+// For a resumed creation that found the thread already made: the line the crashed run may not have
+// written. Appends only when the registry has no line for the thread; returns the line or null.
+export function recordMissingMainThread(rec, { file = mainThreadsFile() } = {}) {
+  return mainThreadRoles({ file }).has(rec.threadId) ? null : recordMainThread(rec, { file });
+}
+
 // A main (orchestrator) thread: created, then sent its first message. Not pinned: a working
 // lead sits in T3's Working section, and an outside tool may pin it while a question of it waits
 // on the user. `pin` (a hand-off carrying the user's own pin) pins it too. With `resume` (the same
 // ids again after a crash or a failed step) each step that already happened is skipped, so a
-// retry finishes the same thread instead of making a second one.
-export async function createMainThread({ threadId, messageId, projectId, title, text, modelSelection, branch = null, worktreePath = null, resume = false, pin = false }, { send = t3Command, query = t3Query } = {}) {
+// retry finishes the same thread instead of making a second one. The thread's creation is recorded
+// in the main-thread registry with `role` and `from`. A resume that finds it made records it only
+// when the registry has no line for it (the process died between the create and the append); an
+// existing line, and so its role, is never touched.
+export async function createMainThread({ threadId, messageId, projectId, title, text, modelSelection, branch = null, worktreePath = null, resume = false, pin = false, role = "orchestrator", from = null }, { send = t3Command, query = t3Query } = {}) {
   const row = resume ? query("select json_extract(payload_json, '$.pinnedAt') as pinned_at from orchestration_v2_projection_threads where thread_id = ?", [threadId])[0] : null;
   const sentFirst = resume && query("select 1 from orchestration_v2_projection_messages where message_id = ?", [messageId]).length > 0;
-  if (!row) await createThread({ threadId, projectId, title, modelSelection, branch, worktreePath }, send);
+  if (!row) {
+    await createThread({ threadId, projectId, title, modelSelection, branch, worktreePath }, send);
+    recordMainThread({ threadId, role, title, from });
+  } else recordMissingMainThread({ threadId, role, title, from });
   if (pin && !row?.pinned_at) await pinThread(threadId, send);
   if (!sentFirst) await sendMessage(threadId, text, { mode: "start", messageId, modelSelection, label: "main thread" }, send);
   return threadId;

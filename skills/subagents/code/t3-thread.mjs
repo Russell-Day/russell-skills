@@ -99,7 +99,7 @@ if (process.argv[2] === "--orchestrator") {
   const text = fs.readFileSync(a.briefFile, "utf8");
   const threadId = randomUUID();
   try {
-    await createMainThread({ threadId, messageId: randomUUID(), projectId: projectFor(projectRoots()), title: a.title, text, modelSelection: mainModelSelection(a.model, a.effort) });
+    await createMainThread({ threadId, messageId: randomUUID(), projectId: projectFor(projectRoots()), title: a.title, text, modelSelection: mainModelSelection(a.model, a.effort), role: "orchestrator" });
   } catch (e) { console.error(`orchestrator thread ${threadId}: ${e.message}`); process.exit(1); }
   console.log(threadId);
   process.exit(0);

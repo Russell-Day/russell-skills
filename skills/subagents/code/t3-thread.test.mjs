@@ -62,7 +62,21 @@ test("--orchestrator: an unpinned main thread with the exact title and the brief
   assert.deepEqual(created.modelSelection, { instanceId: claude.t3Instance, model: "claude-opus-5-5", options: [{ id: "effort", value: "high" }, { id: "fastMode", value: false }] });
   assert.equal(f.sent("message.dispatch")[0].text, "Round 4: build items A and B");
   assert.equal(f.db().threads.find((t) => t.thread_id === id).pinned_at ?? null, null, "not pinned: Working shows it");
-  assert.equal(fs.existsSync(path.join(f.home, "jobs")), false, "no job dir: it counts as a main thread");
+  // No job dir (it counts as a main thread); the jobs dir holds only the main-thread registry line.
+  assert.deepEqual(fs.readdirSync(path.join(f.home, "jobs")), ["main-threads.jsonl"]);
+  const lines = fs.readFileSync(path.join(f.home, "jobs/main-threads.jsonl"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
+  assert.deepEqual(lines.map(({ at, ...l }) => l), [{ threadId: id, role: "orchestrator", title: "Round 4: board lanes" }]);
+  assert.ok(Date.parse(lines[0].at));
+});
+
+test("--orchestrator: each new lead gets its own registry line, whatever its title", () => {
+  const f = fakeHome();
+  const brief = path.join(f.home, "brief.md");
+  fs.writeFileSync(brief, "Sweep the garden notes");
+  const a = ok(f.run(script, ["--orchestrator", "Garden notes sweep", brief], { PROJECT_ROOT: PROJECT })).stdout.trim();
+  const b = ok(f.run(script, ["--orchestrator", "Kitchen inventory: restock list", brief, "--model", "fable"], { PROJECT_ROOT: PROJECT })).stdout.trim();
+  const lines = fs.readFileSync(path.join(f.home, "jobs/main-threads.jsonl"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
+  assert.deepEqual(lines.map((l) => [l.threadId, l.role, l.title, "from" in l]), [[a, "orchestrator", "Garden notes sweep", false], [b, "orchestrator", "Kitchen inventory: restock list", false]]);
 });
 
 test("--orchestrator: bad args exit 2 and send nothing", () => {

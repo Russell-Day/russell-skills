@@ -7,7 +7,14 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { claude } from "./accounts.mjs";
-import { abandonThread, createMainThread, currentThread, getThread, interruptThread, isWorker, jobThreadIds, mainModelSelection, orchestratorArgs, projectFor, renameThread, sendMessage, snoozeThread, workerThreadTitle } from "./t3-api.mjs";
+
+// createMainThread records each new main thread in AGENT_JOBS_DIR/main-threads.jsonl (read on
+// every call): keep it in a temp dir so no test writes the real state dir.
+const JOBS_TMP = fs.mkdtempSync(path.join(os.tmpdir(), "t3-api-jobs-"));
+process.env.AGENT_JOBS_DIR = JOBS_TMP;
+const registryLines = () => { try { return fs.readFileSync(mainThreadsFile(), "utf8").trim().split("\n").filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
+const withoutAt = (lines) => lines.map(({ at, ...l }) => l);
+import { abandonThread, createMainThread, currentThread, mainThreadRoles, mainThreadsFile, recordMainThread, recordMissingMainThread, getThread, interruptThread, isWorker, jobThreadIds, mainModelSelection, orchestratorArgs, projectFor, renameThread, sendMessage, snoozeThread, workerThreadTitle } from "./t3-api.mjs";
 
 test("TITLE worker: the title is the fix (with a model hint), never \"[model] job\"", () => {
   assert.equal(workerThreadTitle({ model: "opus", job: "p65-s3-impl", title: "Board lanes, priority tags" }), "[opus] Board lanes, priority tags");
@@ -119,6 +126,104 @@ test("createMainThread: create, then first message, never pinned; resume skips w
   assert.deepEqual(await resumeWith(null, false, { pin: true }), ["thread.create", "thread.pin", "message.dispatch"]);
   assert.deepEqual(await resumeWith({ pinned_at: null }, false, { pin: true }), ["thread.pin", "message.dispatch"]);
   assert.deepEqual(await resumeWith({ pinned_at: "2026-10-08T10:00:00Z" }, true, { pin: true }), []);
+});
+
+test("main-thread registry: one line per real creation, none for a resume that finds the thread already registered, role and from as given", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "registry-"));
+  process.env.AGENT_JOBS_DIR = dir;
+  try {
+    assert.equal(mainThreadsFile(), path.join(dir, "main-threads.jsonl"));
+    const send = async () => {};
+    const sel = mainModelSelection();
+    const base = { messageId: "m", projectId: "p", text: "brief", modelSelection: sel };
+    const fresh = () => { throw new Error("no reads on a fresh create"); };
+    await createMainThread({ ...base, threadId: "lead-a", title: "Porch lights schedule" }, { send, query: fresh });
+    await createMainThread({ ...base, threadId: "pass-b", title: "Sorting: 4 new notes", role: "triage" }, { send, query: fresh });
+    // A resume that finds the thread made appends nothing; one that has to create it records it.
+    await createMainThread({ ...base, threadId: "lead-a", title: "Porch lights schedule", resume: true }, { send, query: (sql) => (sql.includes("pinned_at") ? [{ pinned_at: null }] : [{ 1: 1 }]) });
+    await createMainThread({ ...base, threadId: "next-c", title: "Porch lights schedule", resume: true, role: "orchestrator", from: "lead-a" }, { send, query: () => [] });
+    await createMainThread({ ...base, threadId: "next-d", title: "Weekend errands", resume: true, role: "own", from: "chat-z" }, { send, query: () => [] });
+    assert.deepEqual(withoutAt(registryLines()), [
+      { threadId: "lead-a", role: "orchestrator", title: "Porch lights schedule" },
+      { threadId: "pass-b", role: "triage", title: "Sorting: 4 new notes" },
+      { threadId: "next-c", role: "orchestrator", title: "Porch lights schedule", from: "lead-a" },
+      { threadId: "next-d", role: "own", title: "Weekend errands", from: "chat-z" },
+    ]);
+    for (const l of registryLines()) assert.ok(Number.isFinite(Date.parse(l.at)), l.at);
+    // A failed thread.create records nothing.
+    await assert.rejects(createMainThread({ ...base, threadId: "never", title: "Refused" }, { send: async () => { throw new Error("T3 down"); }, query: fresh }));
+    assert.equal(registryLines().length, 4);
+    const roles = mainThreadRoles();
+    assert.deepEqual(roles.get("next-c"), { role: "orchestrator", from: "lead-a", title: "Porch lights schedule", at: roles.get("next-c").at });
+    assert.deepEqual([...roles.keys()], ["lead-a", "pass-b", "next-c", "next-d"]);
+  } finally { process.env.AGENT_JOBS_DIR = JOBS_TMP; }
+});
+
+test("main-thread registry (crash recovery): a resume that finds the thread made adds the lost line, only when there is none", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "registry-crash-"));
+  process.env.AGENT_JOBS_DIR = dir;
+  try {
+    const sent = [];
+    const send = async (c) => { sent.push(c.type); };
+    const base = { messageId: "m", projectId: "p", text: "brief", modelSelection: mainModelSelection(), resume: true };
+    // T3 has the thread (created before the crash), no first message yet, and no registry line.
+    const made = (sql) => (sql.includes("pinned_at") ? [{ pinned_at: null }] : []);
+    await createMainThread({ ...base, threadId: "lead-k", title: "Pantry restock", role: "orchestrator", from: "lead-j" }, { send, query: made });
+    await createMainThread({ ...base, threadId: "pass-m", title: "Sorting: 5 new notes", role: "triage" }, { send, query: made });
+    assert.deepEqual(sent, ["message.dispatch", "message.dispatch"], "no second thread.create");
+    // A further resume, and one for a thread that already has a line (even with another role), add nothing.
+    recordMainThread({ threadId: "chat-n", role: "own", title: "Dentist follow-up" });
+    await createMainThread({ ...base, threadId: "lead-k", title: "Pantry restock" }, { send, query: made });
+    await createMainThread({ ...base, threadId: "chat-n", title: "Dentist follow-up", role: "orchestrator" }, { send, query: made });
+    assert.deepEqual(withoutAt(registryLines()), [
+      { threadId: "lead-k", role: "orchestrator", title: "Pantry restock", from: "lead-j" },
+      { threadId: "pass-m", role: "triage", title: "Sorting: 5 new notes" },
+      { threadId: "chat-n", role: "own", title: "Dentist follow-up" },
+    ]);
+    assert.equal(recordMissingMainThread({ threadId: "chat-n", role: "orchestrator", title: "x" }), null);
+    assert.equal(mainThreadRoles().get("chat-n").role, "own");
+  } finally { process.env.AGENT_JOBS_DIR = JOBS_TMP; }
+});
+
+test("main-thread registry: unwritable → the thread is still created and stderr warns", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "registry-ro-"));
+  const blocker = path.join(dir, "not-a-dir");
+  fs.writeFileSync(blocker, "a file where the jobs dir should be");
+  process.env.AGENT_JOBS_DIR = blocker; // mkdir and append both fail (ENOTDIR/EEXIST), even as root
+  const errors = [];
+  const orig = console.error;
+  console.error = (...a) => errors.push(a.join(" "));
+  try {
+    const sent = [];
+    await createMainThread({ threadId: "lead-ro", messageId: "m", projectId: "p", title: "Garage door check", text: "b", modelSelection: mainModelSelection() }, { send: async (c) => sent.push(c.type), query: () => [] });
+    assert.deepEqual(sent, ["thread.create", "message.dispatch"]);
+    assert.equal(errors.length, 1);
+    assert.match(errors[0], /^main-thread registry .*not-a-dir\/main-threads\.jsonl: .*; thread lead-ro \(orchestrator\) started without a record$/);
+    assert.equal(recordMainThread({ threadId: "x", role: "triage", title: "t" }), null);
+    assert.deepEqual(mainThreadRoles(), new Map()); // unreadable: empty, with a warning
+  } finally { console.error = orig; process.env.AGENT_JOBS_DIR = JOBS_TMP; }
+});
+
+test("mainThreadRoles: last line per thread wins, garbage and incomplete lines are skipped, missing file is empty", () => {
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "registry-read-")), "main-threads.jsonl");
+  assert.deepEqual(mainThreadRoles({ file }), new Map());
+  fs.writeFileSync(file, [
+    JSON.stringify({ threadId: "t-1", role: "own", title: "Tax forms", at: "2026-11-01T10:00:00Z" }),
+    "{not json",
+    JSON.stringify({ threadId: "t-2", title: "no role" }),
+    JSON.stringify({ role: "orchestrator", title: "no thread" }),
+    "",
+    JSON.stringify({ threadId: "t-3", role: "triage", title: "Sorting: 2 new notes", at: "2026-11-02T09:00:00Z" }),
+    JSON.stringify({ threadId: "t-1", role: "orchestrator", title: "Tax forms, round 2", at: "2026-11-03T08:00:00Z", from: "t-0" }),
+    "",
+  ].join("\n"));
+  assert.deepEqual(mainThreadRoles({ file }), new Map([
+    ["t-1", { role: "orchestrator", from: "t-0", title: "Tax forms, round 2", at: "2026-11-03T08:00:00Z" }],
+    ["t-3", { role: "triage", from: null, title: "Sorting: 2 new notes", at: "2026-11-02T09:00:00Z" }],
+  ]));
+  // A line written by recordMainThread reads back.
+  recordMainThread({ threadId: "t-4", role: "own", title: "Birthday plans", from: "t-9" }, { file, at: "2026-11-04T12:00:00Z" });
+  assert.deepEqual(mainThreadRoles({ file }).get("t-4"), { role: "own", from: "t-9", title: "Birthday plans", at: "2026-11-04T12:00:00Z" });
 });
 
 test("sendMessage: message.dispatch with T3's required keys; auto steers or queues, queue waits, start starts", async () => {
