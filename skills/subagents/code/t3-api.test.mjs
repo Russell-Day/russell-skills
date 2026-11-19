@@ -235,3 +235,24 @@ test("t3-api.mjs --check runs through a symlinked skills dir (~/.agents/skills/s
   assert.match(r.stdout, /^T3 \S+: ok|T3 API changed/, `the guard must run the check: ${r.stdout}${r.stderr}`);
   assert.ok(r.stdout.trim().length > 0, "--check printed nothing");
 });
+
+test("listThreads includeSettled: false drops settled threads in SQL, by the same rule as `settled`", () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "t3-api-settled-"));
+  fs.mkdirSync(path.join(home, ".t3/userdata"), { recursive: true });
+  fs.writeFileSync(path.join(home, ".t3/userdata/server-runtime.json"), JSON.stringify({ port: 1 }));
+  const at = "2026-10-09T12:00:00.000Z";
+  fs.writeFileSync(path.join(home, "t3.json"), JSON.stringify({ projects: [{ project_id: "proj-1", workspace_root: home }], messages: [], commands: [],
+    threads: [{ thread_id: "open-a" }, { thread_id: "settled-b", settled_at: at }, { thread_id: "override-c", settled_override: "settled" },
+      { thread_id: "unsettled-d", settled_override: "unsettled" }, { thread_id: "archived-e", archived_at: at }].map((t) => ({ title: t.thread_id, created_at: at, ...t })),
+    runs: [{ run_id: "r1", thread_id: "open-a", ordinal: 1, status: "completed", requested_at: at, completed_at: at }] }));
+  const script = path.join(home, "list.mjs");
+  fs.writeFileSync(script, `import { listThreads } from ${JSON.stringify(path.join(here, "t3-api.mjs"))};
+const ids = (o) => listThreads(o).map((t) => t.id + (t.settled ? "*" : "")).sort();
+console.log(JSON.stringify({ all: ids(), open: ids({ includeSettled: false }) }));`);
+  const r = spawnSync(process.execPath, ["--import", path.join(here, "testdata/fake-t3.mjs"), script],
+    { env: { ...process.env, HOME: home, FAKE_T3: path.join(home, "t3.json") }, encoding: "utf8", timeout: 60000 });
+  assert.equal(r.status, 0, r.stderr);
+  const got = JSON.parse(r.stdout);
+  assert.deepEqual(got.all, ["open-a", "override-c*", "settled-b*", "unsettled-d"]);
+  assert.deepEqual(got.open, got.all.filter((id) => !id.endsWith("*"))); // the SQL filter equals the JS rule
+});

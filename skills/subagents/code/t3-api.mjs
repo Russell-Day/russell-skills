@@ -206,12 +206,15 @@ export function getThread(threadId, query = t3Query) {
   return row ? threadFromRow(row) : null;
 }
 
-// Every thread not deleted, optionally in one project; archived ones only when asked.
-export function listThreads({ projectId, includeArchived = false } = {}, query = t3Query) {
+// Every thread not deleted, optionally in one project; archived ones only when asked, settled
+// ones (threadFromRow's `settled` rule, in SQL) unless `includeSettled: false`. Skipping them in SQL
+// spares the per-thread run joins: most threads are settled.
+export function listThreads({ projectId, includeArchived = false, includeSettled = true } = {}, query = t3Query) {
   const where = ["t.deleted_at is null"];
   const params = [];
   if (projectId) { where.push("t.project_id = ?"); params.push(projectId); }
   if (!includeArchived) where.push("json_extract(t.payload_json, '$.archivedAt') is null");
+  if (!includeSettled) where.push("json_extract(t.payload_json, '$.settledAt') is null and coalesce(json_extract(t.payload_json, '$.settledOverride'), '') != 'settled'");
   return query(`${threadSql(where.join(" and "))} order by t.updated_at desc`, params).map(threadFromRow);
 }
 
