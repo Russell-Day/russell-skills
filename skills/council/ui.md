@@ -40,24 +40,31 @@ the owner couldn't see what had changed.
 
 Use a plain brief, not the code review prompt: what the screen is for, the
 owner calls, and the paths of the before shots, the current after shots and
-the reference shots. Add the diff when there is one. Then add:
+the reference shots. Add the diff when there is one, and the path of the
+project's writing skill if it has one. Then add:
 
 > You are one member of a design council. Work read-only. Score the current
 > screen and each reference from 1 to 10 in each category: hierarchy,
 > typography, spacing and alignment, color and contrast, iconography,
-> consistency, and flow (clicks to do the main task, states, feedback).
+> consistency, text (every visible string tells the user something new: no
+> subtitle restating the title, no date nobody needs, no repeated point), and
+> flow (clicks to do the main task, states, feedback).
 > Score phone fit too when phone shots are included. Give the scores as a
 > table with a row for each category and a column for this screen and for
 > each reference. Then list your findings, most serious first, each with the
 > screenshot, the spot on it and the file if you know it. Judge the screen by
-> how well it does its job, using the references only to calibrate. Finish
+> how well it does its job, using the references only to calibrate. If a
+> writing skill is attached, read it and run its trim pass on every visible
+> string; list each string that tells the user nothing new as a finding and
+> score text with it in mind. Finish
 > with exactly these two lines, where N is this screen's lowest category
 > score:
 > `SCORE: N/10`
 > `Short of 10 because: <one line>`
 
 Never tell members the bar they need to clear, or what other members
-scored.
+scored. A text finding (filler) blocks the 9 bar like any other: the next
+round cuts it.
 
 ## Each round
 

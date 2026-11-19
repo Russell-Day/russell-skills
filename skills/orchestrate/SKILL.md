@@ -103,7 +103,9 @@ recorded for the rest; "go with the guess" makes it the decision.
 moves, removes or restyles on purpose) waits for the user's yes on a
 mockup. It is one "Now | Proposed" image: a real shot of the screen today
 next to an HTML mock with real content, at phone and desktop size, with a
-numbered note for each change. Show 2–3 options only at a real design fork.
+numbered note for each change. Before asking, trim its text with the
+project's writing skill, if it has one: cut every string that tells the user
+nothing new. Show 2–3 options only at a real design fork.
 Put the image in the question (a project's answer-card tool may take it as
 `image`), and save the approved one with the plan. Workers build to it,
 reviewers compare the after-shots with it, and the report shows it next to

@@ -12,6 +12,13 @@ For each item in the stage, the worker's packet has a block
 A missing, mismatched or tautological expectation is a REVISE finding, not
 Optional. Propose the extra test in one line when one is obvious.
 
+Visible text: if the stage adds or changes UI, a mockup or any string a person
+sees (titles, labels, help text, empty states, notifications, legend notes),
+run the project's writing skill's trim pass on each new or changed string, if
+it has one. A string that tells the reader nothing new (restates the title or
+the obvious, a date nobody needs, a point the screen already makes) is a
+REVISE finding: quote it and give the cut.
+
 Background jobs (tests, scratch runs): wait on them, never poll: run in the
 foreground, `wait $!`, or `tail --pid=<pid> -f <log>`. Don't re-tail or `ls`
 /tmp logs in a loop.
