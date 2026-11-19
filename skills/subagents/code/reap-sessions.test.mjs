@@ -436,7 +436,7 @@ test("codexBackground: finds the rollout by native id in any Codex home and day;
 test("liveSessions: a shared Codex session gives each thread its own native id, not the session's newest", () => {
   const t = tables();
   const sid = "provider-session:provider-instance:codex:shared";
-  t.orchestration_v2_projection_provider_sessions.push({ provider_session_id: sid, thread_id: "cx-a", provider: "codex", status: "ready", model: "gpt-6.1-sol",
+  t.orchestration_v2_projection_provider_sessions.push({ provider_session_id: sid, thread_id: "cx-a", provider: "codex", status: "ready", model: "gpt-6.2-sol",
     updated_at: min(5), payload_json: "{}", driver: "codex", provider_instance_id: "codex" });
   t.orchestration_v2_projection_provider_session_bindings.push({ provider_session_id: sid, thread_id: "cx-a" });
   for (const [id, native, at] of [["cx-a", "01a1-a", 30], ["cx-b", "01a1-b", 2]]) {
@@ -454,10 +454,10 @@ test("liveSessions: a shared Codex session gives each thread its own native id, 
 function sharedCodex() {
   const t = tables();
   const sid = "provider-session:provider-instance:codex:shared";
-  t.orchestration_v2_projection_provider_sessions.push({ provider_session_id: sid, thread_id: "cx-open", provider: "codex", status: "ready", model: "gpt-6.1-sol",
+  t.orchestration_v2_projection_provider_sessions.push({ provider_session_id: sid, thread_id: "cx-open", provider: "codex", status: "ready", model: "gpt-6.2-sol",
     updated_at: min(1), payload_json: "{}", driver: "codex", provider_instance_id: "codex" });
   const stopped = "provider-session:provider-instance:codex_alt:shared";
-  t.orchestration_v2_projection_provider_sessions.push({ provider_session_id: stopped, thread_id: "cx-stopped", provider: "codex", status: "stopped", model: "gpt-6.1-sol",
+  t.orchestration_v2_projection_provider_sessions.push({ provider_session_id: stopped, thread_id: "cx-stopped", provider: "codex", status: "stopped", model: "gpt-6.2-sol",
     updated_at: min(60), payload_json: "{}", driver: "codex", provider_instance_id: "codex_alt" });
   for (const [id, payload, bound, ran] of [["cx-done", { settledAt: min(35) }, sid, 40], ["cx-open", {}, sid, 1], ["cx-busy", { settledAt: min(35) }, sid, 40], ["cx-stopped", { settledAt: min(35) }, stopped, 40]]) {
     t.orchestration_v2_projection_threads.push({ thread_id: id, project_id: "p", title: id, default_provider: "codex", runtime_mode: "full-access", interaction_mode: "default",

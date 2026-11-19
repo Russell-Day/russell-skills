@@ -237,7 +237,7 @@ export function compactionCount(threadId, query = t3Query) {
 }
 
 // Delegated worker threads: titled "[model] job" by t3-thread.mjs, unless TITLE gave them a fix name.
-export const workerTitle = /^\[(?:sol|sol61|luna|astra|fable|opus|sonnet|haiku|gemini-flash)\] /;
+export const workerTitle = /^\[(?:sol|sol62|sol61|luna|astra|fable|opus|sonnet|haiku|gemini-flash)\] /;
 
 // A worker's thread title: "<fix> · <model>" with TITLE, else "[<model>] <job>". The user reads
 // the sidebar by fix, so a leading "Plan 7 S1:" is dropped (the job dir keeps the stage).
@@ -502,7 +502,7 @@ export function mainModelSelection(model = "opus", effort = "high") {
 
 // A main thread on the default Codex account: a fallback when the Claude
 // thread fails (an expired Claude login once killed one in 2 s).
-export function codexMainSelection(model = "gpt-6.1-sol", effort = "high") {
+export function codexMainSelection(model = "gpt-6.2-sol", effort = "high") {
   const instanceId = codexAccount(codexDefault)?.t3Instance;
   if (!instanceId) throw new Error(`no T3 instance for Codex account ${codexDefault}`);
   return { instanceId, model, options: [{ id: "reasoningEffort", value: effort }, { id: "serviceTier", value: "default" }] };

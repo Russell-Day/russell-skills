@@ -268,32 +268,32 @@ test("CONTINUE on a Gemini thread while AGY is fine: the same thread continues o
   assert.deepEqual(starts.map((c) => [c.threadId, c.modelSelection.instanceId, c.dispatchMode.type, c.createdBy]), [[old, "antigravity", "queue_after_active", "agent"]]);
 });
 
-// attempts.jsonl records what the thread really runs on (sol61 R1/R2): the attached
+// attempts.jsonl records what the thread really runs on (sol62 R1/R2): the attached
 // thread's own model and account on a re-poll, the dispatched selection on CONTINUE,
 // each Codex account on a retry.
 // Accounts from this machine's accounts.mjs: a Codex account other than the default, and the Claude worker profile.
 const other = codexAccounts.find((a) => a.name !== codexDefault);
 const dflt = codexAccounts.find((a) => a.name === codexDefault);
 const haikuInstance = claude.t3WorkerInstance;
-const sol61On = (instanceId) => JSON.stringify({ instanceId, model: "gpt-6.1-sol", options: [{ id: "reasoningEffort", value: "high" }, { id: "serviceTier", value: "default" }] });
+const sol62On = (instanceId) => JSON.stringify({ instanceId, model: "gpt-6.2-sol", options: [{ id: "reasoningEffort", value: "high" }, { id: "serviceTier", value: "default" }] });
 const haikuOn = (instanceId) => JSON.stringify({ instanceId, model: "claude-haiku-5-5", options: [{ id: "effort", value: "high" }, { id: "contextWindow", value: "200k" }] });
 const row = (a) => [a.model_label, a.model_id, a.effort, a.account, a.exit];
 
 test("ATTACH re-poll of a Codex thread on another account: its own model, effort and account", () => {
   const old = "33333333-3333-4333-8333-333333333333";
-  const f = agyHome({ threads: [{ thread_id: old, project_id: "proj-1", model_selection_json: sol61On(other.t3Instance) }] });
-  ok(f.run("att", { ATTACH: old }, "sol61"));
+  const f = agyHome({ threads: [{ thread_id: old, project_id: "proj-1", model_selection_json: sol62On(other.t3Instance) }] });
+  ok(f.run("att", { ATTACH: old }, "sol62"));
   assert.equal(f.sent().length, 0, "a re-poll sends nothing");
-  assert.deepEqual(f.attempts("att").map((a) => [...row(a), a.thread_id]), [["sol61", "gpt-6.1-sol", "high", other.name, 0, old]]);
+  assert.deepEqual(f.attempts("att").map((a) => [...row(a), a.thread_id]), [["sol62", "gpt-6.2-sol", "high", other.name, 0, old]]);
 });
 
 test("CONTINUE of a Codex thread on another account: the dispatched account is recorded", () => {
   const old = "44444444-4444-4444-8444-444444444444";
-  const f = agyHome({ threads: [{ thread_id: old, project_id: "proj-1", model_selection_json: sol61On(other.t3Instance) }] });
-  ok(f.run("cont3", { ATTACH: old, CONTINUE: "1" }, "sol61"));
+  const f = agyHome({ threads: [{ thread_id: old, project_id: "proj-1", model_selection_json: sol62On(other.t3Instance) }] });
+  ok(f.run("cont3", { ATTACH: old, CONTINUE: "1" }, "sol62"));
   const [start] = f.sent("message.dispatch");
   assert.equal(start.modelSelection.instanceId, other.t3Instance);
-  assert.deepEqual(f.attempts("cont3").map(row), [["sol61", "gpt-6.1-sol", "high", other.name, 0]]);
+  assert.deepEqual(f.attempts("cont3").map(row), [["sol62", "gpt-6.2-sol", "high", other.name, 0]]);
 });
 
 test("ATTACH re-poll of an earlier Haiku fallback, given the gemini-flash label: recorded as Haiku", () => {
@@ -314,11 +314,11 @@ test("CONTINUE of an earlier Haiku fallback with AGY recovered: stays on Haiku, 
 
 test("ACCOUNT=auto Codex retry: each attempt records its own account", () => {
   const f = agyHome();
-  ok(f.run("retry", { ACCOUNT: "auto", FAKE_PICKS: `${dflt.name},${other.name}`, FAKE_LIMIT_INSTANCE: dflt.t3Instance }, "sol61"));
+  ok(f.run("retry", { ACCOUNT: "auto", FAKE_PICKS: `${dflt.name},${other.name}`, FAKE_LIMIT_INSTANCE: dflt.t3Instance }, "sol62"));
   const created = f.sent("thread.create");
   assert.deepEqual(created.map((c) => c.modelSelection.instanceId), [dflt.t3Instance, other.t3Instance]);
   assert.deepEqual(f.attempts("retry").map((a) => [...row(a), a.thread_id]),
-    [["sol61", "gpt-6.1-sol", "high", dflt.name, 1, created[0].threadId], ["sol61", "gpt-6.1-sol", "high", other.name, 0, created[1].threadId]]);
+    [["sol62", "gpt-6.2-sol", "high", dflt.name, 1, created[0].threadId], ["sol62", "gpt-6.2-sol", "high", other.name, 0, created[1].threadId]]);
   assert.deepEqual(f.sent("thread.settle").map((c) => c.threadId), [created[0].threadId], "the limited thread is settled; NO_SETTLE keeps the last");
   const types = f.sent().map((c) => c.type);
   assert.ok(types.indexOf("thread.settle") < types.lastIndexOf("thread.create"), `settled before the retry starts: ${types}`);
@@ -326,7 +326,7 @@ test("ACCOUNT=auto Codex retry: each attempt records its own account", () => {
 
 test("limit fallback: a message queued behind the limit is removed, the thread settled, then the retry starts", () => {
   const f = agyHome();
-  ok(f.run("retry-queued", { ACCOUNT: "auto", FAKE_PICKS: `${dflt.name},${other.name}`, FAKE_LIMIT_INSTANCE: dflt.t3Instance, FAKE_QUEUE_AFTER_LIMIT: "1" }, "sol61"));
+  ok(f.run("retry-queued", { ACCOUNT: "auto", FAKE_PICKS: `${dflt.name},${other.name}`, FAKE_LIMIT_INSTANCE: dflt.t3Instance, FAKE_QUEUE_AFTER_LIMIT: "1" }, "sol62"));
   const created = f.sent("thread.create");
   assert.deepEqual(created.map((c) => c.modelSelection.instanceId), [dflt.t3Instance, other.t3Instance]);
   const order = f.sent().filter((c) => c.type !== "message.dispatch").map((c) => `${c.type} ${c.threadId === created[0].threadId ? 1 : 2}`);
@@ -337,7 +337,7 @@ test("limit fallback: a message queued behind the limit is removed, the thread s
 
 test("limit fallback: T3 refuses to settle the limited thread, so no retry starts; exit 1, the reason on stderr and in run.log", () => {
   const f = agyHome();
-  const r = f.run("retry-refused", { ACCOUNT: "auto", FAKE_PICKS: `${dflt.name},${other.name}`, FAKE_LIMIT_INSTANCE: dflt.t3Instance, FAKE_SETTLE_REFUSE: "*" }, "sol61");
+  const r = f.run("retry-refused", { ACCOUNT: "auto", FAKE_PICKS: `${dflt.name},${other.name}`, FAKE_LIMIT_INSTANCE: dflt.t3Instance, FAKE_SETTLE_REFUSE: "*" }, "sol62");
   assert.equal(r.status, 1, r.stderr);
   const created = f.sent("thread.create");
   assert.equal(created.length, 1, "no second account was tried");
@@ -558,23 +558,23 @@ test("timeout: the running run is interrupted with run.interrupt; exit 124", () 
   assert.equal(f.read("report.md"), "half done");
 });
 
-// New stage, fresh reviewer: a sol61/astra thread ATTACHed with CONTINUE under a
+// New stage, fresh reviewer: a sol62/astra thread ATTACHed with CONTINUE under a
 // JOB other than the one whose job dir records it starts a fresh thread; the same JOB continues.
-const sol61Sel = JSON.stringify({ instanceId: "codex", model: "gpt-6.1-sol", options: [{ id: "reasoningEffort", value: "medium" }, { id: "serviceTier", value: "default" }] });
+const sol62Sel = JSON.stringify({ instanceId: "codex", model: "gpt-6.2-sol", options: [{ id: "reasoningEffort", value: "medium" }, { id: "serviceTier", value: "default" }] });
 function reviewerHome(rows = []) {
   const f = handoffHome(rows);
-  f.oldThread({ title: "[sol61] Review S1", model_selection_json: sol61Sel });
+  f.oldThread({ title: "[sol62] Review S1", model_selection_json: sol62Sel });
   const readJob = (job, file) => { try { return fs.readFileSync(path.join(f.jobs, job, file), "utf8"); } catch { return ""; } };
-  const review = (job) => f.run({ JOB: job, TITLE: "Review S2", REPORT_FILE: path.join(f.jobs, job, "report.md") }, ["sol61", f.prompt]);
+  const review = (job) => f.run({ JOB: job, TITLE: "Review S2", REPORT_FILE: path.join(f.jobs, job, "report.md") }, ["sol62", f.prompt]);
   return { ...f, readJob, review };
 }
 
-test("new stage: a sol61 thread recorded under another JOB gets a fresh reviewer thread, printed and logged", () => {
+test("new stage: a sol62 thread recorded under another JOB gets a fresh reviewer thread, printed and logged", () => {
   const f = reviewerHome();
   const r = ok(f.review("p2"));
   const [created] = f.sent("thread.create");
   assert.ok(created, "a fresh thread");
-  assert.equal(created.modelSelection.model, "gpt-6.1-sol");
+  assert.equal(created.modelSelection.model, "gpt-6.2-sol");
   assert.deepEqual(f.sent("message.dispatch").map((s) => s.threadId), [created.threadId], "the old reviewer gets no turn");
   const line = "new stage p1→p2: fresh reviewer thread";
   assert.ok(r.stderr.includes(line), r.stderr);
@@ -616,7 +616,7 @@ test("review budget: rounds 1-3 go (a free-form recheck counts), the 4th sends n
   assert.match(r.stderr, /review budget: round 4 > 3 for p1; nothing sent\..*REVIEW_ROUNDS=5/);
   assert.equal(f.sent("message.dispatch").length, before, "no turn");
   assert.equal(f.readJob("p1", "exit_code"), "3\n");
-  assert.ok(ok(f.run({ JOB: "p1", REVIEW_ROUNDS: "5", REPORT_FILE: path.join(f.jobs, "p1", "report.md") }, ["sol61", f.prompt])));
+  assert.ok(ok(f.run({ JOB: "p1", REVIEW_ROUNDS: "5", REPORT_FILE: path.join(f.jobs, "p1", "report.md") }, ["sol62", f.prompt])));
   assert.equal(f.readJob("p1", "rounds"), "4\n", "REVIEW_ROUNDS=5 allows round 4");
 });
 

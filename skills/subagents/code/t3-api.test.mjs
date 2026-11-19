@@ -12,8 +12,8 @@ import { abandonThread, createMainThread, currentThread, getThread, interruptThr
 test("TITLE worker: the title is the fix (with a model hint), never \"[model] job\"", () => {
   assert.equal(workerThreadTitle({ model: "opus", job: "p65-s3-impl", title: "Board lanes, priority tags" }), "[opus] Board lanes, priority tags");
   assert.equal(workerThreadTitle({ model: "opus", job: "p65-s3-impl", title: "Board lanes", attempt: 2 }), "[opus] Board lanes (retry 1)");
-  assert.equal(workerThreadTitle({ model: "sol61", job: "p65-s3-review" }), "[sol61] p65-s3-review");
-  assert.equal(workerThreadTitle({ model: "sol61", job: "p65-s3-review", title: "  " }), "[sol61] p65-s3-review");
+  assert.equal(workerThreadTitle({ model: "sol62", job: "p65-s3-review" }), "[sol62] p65-s3-review");
+  assert.equal(workerThreadTitle({ model: "sol62", job: "p65-s3-review", title: "  " }), "[sol62] p65-s3-review");
 });
 
 test("isWorker: \"[model] job\" title, or a job dir that recorded the thread (thread_id or threads)", () => {

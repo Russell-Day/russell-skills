@@ -104,7 +104,7 @@ Scores are 0–10, higher is better, except **Cost**, where higher means scarcer
 | Label | Exact ID (harness) | Default reasoning | Orchestrator | Taste | Code | Review | Explore | Cost |
 |---|---|---|---:|---:|---:|---:|---:|---:|
 | `terra61` | `gpt-6.1-terra` (Codex) | **high**, every review and recheck | – | – | – | 9 | – | 5 |
-| `sol61` | `gpt-6.1-sol` (Codex) | **high, final reviews only** (alone) | 5 | 5 | 7 | 9 | 8 | 5 |
+| `sol62` | `gpt-6.2-sol` (Codex) | **high, final reviews only** (alone) | 5 | 5 | 7 | 9 | 8 | 5 |
 | `fable` | `claude-fable-5-2` (Claude) | med | 10 | 8 | 8 | 8 | – | 5 |
 | `opus` | `claude-opus-5-5` (Claude) | high (workers and leads) | 7 | 9 | 9 | 8 | – | 3 |
 | `haiku` | `claude-haiku-5-5` (Claude) | high | 2 | – | 4 | – | 7 | 1 |
@@ -119,7 +119,7 @@ Scores are 0–10, higher is better, except **Cost**, where higher means scarcer
   reading live data rather than only code.
 - **Cost:** the share of the user's capacity a run uses (see above).
 
-On Codex, route only to terra61 and sol61, and only for reviews. Not routed:
+On Codex, route only to terra61 and sol62, and only for reviews. Not routed:
 Astra, Sonnet, Luna and Antigravity's Claude models (the scripts still accept
 `sol`, `luna`, `astra`, `sonnet`). Don't silently swap model versions;
 `run.sh` refuses a model an account lacks rather than substituting. `med` means
@@ -136,7 +136,7 @@ Astra, Sonnet, Luna and Antigravity's Claude models (the scripts still accept
 | Plan critique | Opus (high) for depth; terra61 (high) for value |
 | Second opinion on a plan or approach | Cross-family; see below |
 | Stage review, rechecks | **terra61 (high)**, one reviewer |
-| Orchestrator's final review over all its commits | **sol61 (high)** alone |
+| Orchestrator's final review over all its commits | **sol62 (high)** alone |
 
 Sonnet isn't routed: a bake-off had Haiku match it on searches, tracing, test triage and bug hunts at about a
 tenth of the cost; implementation stays on Opus. Don't use Haiku as a code
@@ -188,7 +188,7 @@ JOB=<lead>-inventory    $S/run.sh gemini-flash /tmp/<lead>-inventory.md
   rechecks and second opinions: one review per commit, batching a few small
   tasks; risky work (mail or messages, deletes, GPU, schema) is reviewed on
   its own.
-- **Finals: sol61 high alone** (`JOB=<plan>-final-sol`). Rechecks on its
+- **Finals: sol62 high alone** (`JOB=<plan>-final-sol`). Rechecks on its
   thread; the final closes on its APPROVE (or a close note).
 - **A multi-model fan-out only when the user asks for one,** and then once, over
   the final range.
@@ -227,8 +227,8 @@ JOB=plan<N>-<stage>-review node $S/t3-thread.mjs terra61 /tmp/stage-x.md
 # REVISE -> fix -> recheck on the same reviewer thread:
 ATTACH=$(cat ~/.local/state/agent-jobs/plan<N>-<stage>-review/thread_id) CONTINUE=1 \
   JOB=plan<N>-<stage>-review node $S/t3-thread.mjs terra61 /tmp/stage-x-recheck.md
-# orchestrator's final: sol61 high alone
-JOB=plan<N>-final-sol node $S/t3-thread.mjs sol61 /tmp/final.md
+# orchestrator's final: sol62 high alone
+JOB=plan<N>-final-sol node $S/t3-thread.mjs sol62 /tmp/final.md
 ```
 
 Fallback when `t3-thread.mjs` can't run: `delegate_task` with
@@ -245,7 +245,7 @@ family from the lead:
 | Lead | Adviser |
 |---|---|
 | Claude (Opus, Fable) | terra61, `EFFORT=high` |
-| Codex (terra61, sol61) | Opus, `EFFORT=high`; Fable when the user asks |
+| Codex (terra61, sol62) | Opus, `EFFORT=high`; Fable when the user asks |
 
 - **What to send:** the objective, the constraints, the paths, the proposed
   approach and its alternatives, and the open decisions.
@@ -429,7 +429,7 @@ the same job directory. Use it if T3 is down or a `t3 update` breaks the
 internal RPC. Use native harness subagents only when neither script works.
 
 ```bash
-JOB=stage-x-review EFFORT=high $S/run.sh sol61 /tmp/stage-x.md
+JOB=stage-x-review EFFORT=high $S/run.sh sol62 /tmp/stage-x.md
 $S/parallel-review.sh /tmp/stage-a.md /tmp/stage-b.md   # disjoint stages at once
 ```
 

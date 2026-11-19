@@ -189,13 +189,13 @@ check "stderr-only reset: board notice" lines "$HOME_/board.posts" 1
 setup
 read -r first second < <(cd "$here" && HOME=$HOME_ command node --input-type=module -e 'import { codexAccounts, codexDefault } from "./accounts.mjs"; console.log(codexDefault, codexAccounts.find((a) => a.name !== codexDefault).name)')
 home_of() { HOME=$HOME_ command node "$here/accounts.mjs" codex-home "$1"; }
-for a in "$first" "$second"; do mkdir -p "$(home_of "$a")"; echo '{"models":[{"slug":"gpt-6.1-sol"}]}' >"$(home_of "$a")/models_cache.json"; done
-launch_as sol61 retry ACCOUNT=auto FAKE_PICKS="$first,$second" LIMIT_HOME="$(home_of "$first")"; rc=$?
+for a in "$first" "$second"; do mkdir -p "$(home_of "$a")"; echo '{"models":[{"slug":"gpt-6.2-sol"}]}' >"$(home_of "$a")/models_cache.json"; done
+launch_as sol62 retry ACCOUNT=auto FAKE_PICKS="$first,$second" LIMIT_HOME="$(home_of "$first")"; rc=$?
 check "codex retry: exit 0" test $rc -eq 0
 check "codex retry: report from the second account" has "$jobs/retry/report.md" "codex report"
 check "codex retry: CODEX_HOME per attempt" test "$(cat "$HOME_/codex.homes" | tr '\n' ' ')" = "$(home_of "$first") $(home_of "$second") "
 check "codex retry: attempts record each account" test "$(jq_ "$jobs/retry/attempts.jsonl" '[(r["model_label"], r["model_id"], r["effort"], r["account"], r["exit"]) for r in rows]')" \
-  = "[('sol61', 'gpt-6.1-sol', 'high', '$first', 1), ('sol61', 'gpt-6.1-sol', 'high', '$second', 0)]"
+  = "[('sol62', 'gpt-6.2-sol', 'high', '$first', 1), ('sol62', 'gpt-6.2-sol', 'high', '$second', 0)]"
 check "codex retry: start/end parse, in order" ordered "$jobs/retry/attempts.jsonl"
 
 # Inside a T3 thread run.sh records its lead ("<thread id> <pid> <start>") while it runs, so a

@@ -22,7 +22,7 @@ test("prune picks TITLE workers by job dir, \"[model] job\" titles and delegate_
   const ids = new Set(["fix-named"]);
   const threads = [
     thread("fix-named", "[opus] Board lanes, priority tags"),
-    thread("old-style", "[sol61] p64-review"),
+    thread("old-style", "[sol62] p64-review"),
     thread("thread:delegated-task:command%3Aabc", "Port the adapter"),
     thread("main", "Triaging: 3 new items"),
   ];
@@ -99,11 +99,11 @@ test("--settle picks ended delegate_task children and idle provider subagents, n
 
 test("--settle also picks a t3-thread worker a late helper report re-opened, once no helper of its runs", () => {
   const CUT = "2026-10-28T11:50:00Z";
-  const t = (id, edits = {}) => ({ id, title: `[sol61] ${id}`, settled: false, archivedAt: null, deletedAt: null, activeRunId: null, busy: false,
+  const t = (id, edits = {}) => ({ id, title: `[sol62] ${id}`, settled: false, archivedAt: null, deletedAt: null, activeRunId: null, busy: false,
     status: "completed", latestRunCompletedAt: "2026-10-28T10:35:00Z", updatedAt: "2026-10-28T10:35:00Z", ...edits });
   const threads = [t("reopened"), t("waits"), t("main", { title: "Screen time" }),
     { ...t("helper"), id: "thread:delegated-task:h", status: "running", busy: true, activeRunId: "r", lineage: { parentThreadId: "waits" } }];
-  assert.deepEqual(settleable(threads, CUT, { worker: (id, title) => title.startsWith("[sol61]") && !id.startsWith("thread:"), waiting: () => [], held: () => false }).map((x) => x.id), ["reopened"]);
+  assert.deepEqual(settleable(threads, CUT, { worker: (id, title) => title.startsWith("[sol62]") && !id.startsWith("thread:"), waiting: () => [], held: () => false }).map((x) => x.id), ["reopened"]);
 });
 
 test("--settle --min 0: a just-finished child settles, but not while its live session still owes background work", () => {

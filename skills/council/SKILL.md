@@ -1,6 +1,6 @@
 ---
 name: council
-description: Run a council, a scored multi-model review by Opus and Sol 6.1 at high effort (Fable joins round 1 and the final check on plans, design docs and writing), looping until every member scores at least 9/10, then record the rounds and scores in the commit or PR. For UI and design ("UI council", "council the design") members score fresh screenshots against reference apps per category, and the work ends with an annotated before/after image of what changed (ui.md). Use only when the user asks for a council (e.g. "council", "council this", "run the council on the plan"); it never replaces the normal review cadence.
+description: Run a council, a scored multi-model review by Opus and Sol 6.2 at high effort (Fable joins round 1 and the final check on plans, design docs and writing), looping until every member scores at least 9/10, then record the rounds and scores in the commit or PR. For UI and design ("UI council", "council the design") members score fresh screenshots against reference apps per category, and the work ends with an annotated before/after image of what changed (ui.md). Use only when the user asks for a council (e.g. "council", "council this", "run the council on the plan"); it never replaces the normal review cadence.
 ---
 
 # Council
@@ -19,11 +19,11 @@ Run it only when asked. Ordinary stage reviews and finals keep following the
 | Member | Model id | `t3-thread.mjs` label | Effort | Seated on |
 |---|---|---|---|---|
 | Opus | `claude-opus-5-5` | `opus` | high | every council |
-| Sol 6.1 | `gpt-6.1-sol` | `sol61` | high (pass `EFFORT=high`; its default is medium) | every council |
+| Sol 6.2 | `gpt-6.2-sol` | `sol62` | high (pass `EFFORT=high`; its default is medium) | every council |
 | Fable | `claude-fable-5-2` | `fable` | high | plans, design docs and writing: round 1 and the final check only |
 
-**Code and UI councils are Opus and Sol 6.1.** On code and screens most of
-Fable's findings repeated Opus's (same model family), while Sol 6.1 caught
+**Code and UI councils are Opus and Sol 6.2.** On code and screens most of
+Fable's findings repeated Opus's (same model family), while Sol 6.2 caught
 bugs neither Claude model saw; a Fable review also spends its own weekly
 bucket and the Claude 5-hour session Opus shares. On plans, design docs,
 strategy and other writing Fable added ideas the other two didn't, so it sits
@@ -77,7 +77,7 @@ background task and wait for all of them:
 ```bash
 S=~/.agents/skills/subagents/code   # or the repo's own subagents copy
 EFFORT=high JOB=<topic>-council-opus  node $S/t3-thread.mjs opus  /tmp/<topic>-council.md
-EFFORT=high JOB=<topic>-council-sol61 node $S/t3-thread.mjs sol61 /tmp/<topic>-council.md
+EFFORT=high JOB=<topic>-council-sol62 node $S/t3-thread.mjs sol62 /tmp/<topic>-council.md
 # plans, design docs, writing only:
 EFFORT=high JOB=<topic>-council-fable node $S/t3-thread.mjs fable /tmp/<topic>-council.md
 ```
@@ -96,7 +96,7 @@ so its brief carries the earlier findings and what changed.
 1. **Round 1: every seated member in parallel**, blind. Merge the findings,
    decide which to take, and fix them.
 2. **Opus alone.** Recheck Opus, fix, and repeat until it scores 9 or higher.
-3. **Sol 6.1.** Recheck Sol, fix, and repeat until it scores 9 or higher. If a
+3. **Sol 6.2.** Recheck Sol, fix, and repeat until it scores 9 or higher. If a
    fix is big (a new design, not a patch), send it past Opus once more before
    Sol sees it.
 4. **Fable final check** (plans, design docs, writing only). Recheck Fable
@@ -123,10 +123,10 @@ every member run (rechecks too), check that the last line of the job's
 - `t3-thread.mjs` quietly moves a limited Fable job to Opus (`model_id` is
   `claude-opus-5-5`). That review is not Fable's: drop its score and mark
   Fable unavailable.
-- A limited Sol 6.1 run on the default account ends with a non-zero `exit`
+- A limited Sol 6.2 run on the default account ends with a non-zero `exit`
   in `attempts.jsonl`; `report.md` then holds the limit error or a partial
   reply with no `SCORE:`. (With `ACCOUNT=auto` the script first
-  tries the next Codex account, still Sol 6.1, which is fine.)
+  tries the next Codex account, still Sol 6.2, which is fine.)
 
 ## Recording the rounds
 
@@ -141,7 +141,7 @@ Rounds: 4 · passed at 9/10 each
 | Member | R1 | R2 | R3 | R4 | Final |
 |---|---|---|---|---|---|
 | Opus 5.5 (high) | 7 | 9 | — | — | 9 |
-| Sol 6.1 (high) | 7 | — | 9 | — | 9 |
+| Sol 6.2 (high) | 7 | — | 9 | — | 9 |
 | Fable 5.2 (high) | 6 | — | — | 9 | 9 |
 | Average | 6.7 | — | — | — | 9.0 |
 ```

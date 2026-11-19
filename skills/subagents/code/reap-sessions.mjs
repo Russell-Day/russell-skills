@@ -124,7 +124,7 @@ export function sessionBackground(s, { projectsDir = path.join(claude.configDir,
 }
 
 // Work a Codex rollout (one JSONL session log) still owes before its session is done:
-// [{ id, tool, what, startedAt }]. Shapes checked on sol61 reviews and leads in ~/.codex/sessions
+// [{ id, tool, what, startedAt }]. Shapes checked on sol62 reviews and leads in ~/.codex/sessions
 // (2026-10-28..30, cli 0.164):
 // - turn: event_msg task_started, ended by event_msg task_complete (same turn_id) or turn_aborted.
 //   A session runs one turn at a time, so a new task_started or a turn_aborted also ends every

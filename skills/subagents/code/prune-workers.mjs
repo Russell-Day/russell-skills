@@ -18,7 +18,7 @@
 // stops with one "stopped: …" line and leaves the rest for the next run. Without that a slow
 // T3 made one run last minutes, and systemd started the next one the moment it ended.
 //
-// A worker thread ("[sol61] job", "[opus] job", or a TITLE fix name whose job dir
+// A worker thread ("[sol62] job", "[opus] job", or a TITLE fix name whose job dir
 // recorded the thread; see isWorker in t3-api.mjs) is pruned once
 // it is settled and nothing has happened in it for --days days (default 5). A delegate_task
 // child is never settled, so it is pruned once it has stopped for good: no live run, no queued
