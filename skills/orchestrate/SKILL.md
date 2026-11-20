@@ -249,9 +249,10 @@ reruns the stage's tests on the fixed copy, so its APPROVE covers the commit.
 
 One stage per commit, on APPROVE (or at budget end with every open id
 disputed), by the lead (workers never commit). Don't rerun the stage's tests
-when the APPROVE packet shows them passing and the stage files still match the
-reviewed copy (`cmp` each one); rerun them when you edited anything after the
-review or the copy is gone. When the tree holds other
+when the APPROVE packet shows them passing, the stage files still match the
+reviewed copy (`cmp` each one) and no commit since the copy was made touched
+code; rerun them when you edited anything after the review, HEAD's code moved,
+or the copy is gone. When the tree holds other
 stages' or sessions' WIP, commit from a **private index with a HEAD check**,
 so a commit from another session in between is not rolled back:
 
