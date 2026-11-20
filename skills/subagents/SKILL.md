@@ -365,7 +365,7 @@ Then it settles the thread.
 
 **Thread upkeep** (optional systemd user timers): `settle-workers.timer`
 settles finished workers every minute, `prune-workers.timer` archives worker
-threads settled over 5 days ago, and `reap-sessions.timer` closes the idle
+threads settled over 5 days ago (and, with `--main-days 30`, main threads settled over 30 days ago), and `reap-sessions.timer` closes the idle
 Claude and Codex processes of finished threads (a later message resumes them).
 What each one keeps, its flags, and the install commands:
 [references/upkeep.md](references/upkeep.md).

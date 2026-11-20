@@ -25,7 +25,9 @@ for u in $units; do systemctl --user enable --now $u.timer; done'
 more than 5 days ago, with no activity since, is archived, so the sidebar keeps the
 orchestrators. Archived threads keep their transcripts (unarchive in T3), and job
 reports stay in the job directory. `--dry-run` lists them, `--days N` changes the
-age, and `--delete` deletes instead. Main threads are never touched.
+age, and `--delete` deletes instead. Main threads are left alone unless `--main-days N`
+is given: then a main thread settled with no activity for N days, not pinned or snoozed,
+is archived (never deleted). The shipped unit passes `--main-days 30`.
 `--settle [--min N]` settles finished delegate_task children (and the
 provider subagent threads under them) once they've been stopped for N min,
 and `[<model>] <job>` worker threads that a late report from their own helper

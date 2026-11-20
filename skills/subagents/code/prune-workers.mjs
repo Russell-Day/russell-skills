@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Archive old delegated worker threads so T3's sidebar keeps the orchestrators.
 //
-//   node prune-workers.mjs [--days 5] [--dry-run] [--delete]
+//   node prune-workers.mjs [--days 5] [--dry-run] [--delete] [--main-days 30]
 //   node prune-workers.mjs --settle [--min 10] [--timeout-s 15] [--deadline-s 40] [--dry-run]
 //
 // --settle settles delegate_task children (and the provider subagent threads under them, and
@@ -24,8 +24,10 @@
 // child is never settled, so it is pruned once it has stopped for good: no live run, no queued
 // message waiting to start, its latest run ended, and nothing since for --days days. Archived
 // threads keep their transcript and can be unarchived in T3; --delete removes them
-// instead. Job reports stay in the job directories either way. Main threads are never
-// touched. prune-workers.timer runs this daily.
+// instead. Job reports stay in the job directories either way. Main threads are left alone
+// unless --main-days N is given: then a main thread settled with no activity for N days, not
+// pinned and not snoozed, is archived (never deleted, whatever --delete says).
+// prune-workers.timer runs this daily.
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import { codexBackground, sessionBackground } from "./reap-sessions.mjs";
@@ -43,6 +45,13 @@ export const pruneable = (threads, cutoff, { remove = false, worker = isWorker, 
     (t.settled && (t.settledAt ?? t.updatedAt) < cutoff && (t.updatedAt ?? t.settledAt) < cutoff && worker(t.id, t.title))
     || (isChild(t) && !t.activeRunId && ENDED.includes(t.status) && (t.latestRunCompletedAt ?? "") < cutoff
       && t.updatedAt < cutoff && waiting(t.id).length === 0)));
+
+// The main threads (neither workers nor delegate_task children) settled before `cutoff` (ISO)
+// with nothing since, not pinned, not snoozed and not already archived.
+export const staleMain = (threads, cutoff, { now = Date.now(), worker = isWorker } = {}) =>
+  threads.filter((t) => !t.deletedAt && !t.archivedAt && t.settled && !isChild(t) && !worker(t.id, t.title)
+    && !t.pinnedAt && !(t.snoozedUntil && Date.parse(t.snoozedUntil) > now)
+    && (t.settledAt ?? t.updatedAt) < cutoff && (t.updatedAt ?? t.settledAt) < cutoff);
 
 // The delegate_task children (and provider subagent threads, which never run a T3 run and sit
 // "idle") stopped before `cutoff` (ISO) and not settled, archived or snoozed. Also t3-thread.mjs
@@ -143,4 +152,15 @@ async function main() {
     } catch (e) { console.error(`${t.id} ${t.title}: ${e.message}`); process.exitCode = 1; }
   }
   console.log(`${dryRun ? "would prune" : remove ? "deleted" : "archived"} ${dryRun ? workers.length : done} worker thread(s) settled or finished over ${days} day(s) ago`);
+
+  if (!args.includes("--main-days")) return;
+  const mainDays = Number(option("--main-days", ""));
+  if (!(mainDays > 0)) throw new Error("--main-days must be a positive number");
+  const mains = staleMain(listThreads(), new Date(Date.now() - mainDays * 86400000).toISOString());
+  let archived = 0;
+  for (const t of mains) {
+    if (dryRun) { console.log(`would archive ${t.id} ${t.title}`); continue; }
+    try { await archiveThread(t.id); archived += 1; } catch (e) { console.error(`${t.id} ${t.title}: ${e.message}`); process.exitCode = 1; }
+  }
+  console.log(`${dryRun ? "would archive" : "archived"} ${dryRun ? mains.length : archived} main thread(s) settled over ${mainDays} day(s) ago`);
 }

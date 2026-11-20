@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { isWorker } from "./t3-api.mjs";
 import fs from "node:fs";
 import os from "node:os";
-import { backgroundHold, pruneable, settleable } from "./prune-workers.mjs";
+import { backgroundHold, pruneable, settleable, staleMain } from "./prune-workers.mjs";
 import { codexBackground } from "./reap-sessions.mjs";
 import { ago, fakeHome } from "./testdata/fake-home.mjs";
 
@@ -40,6 +40,24 @@ test("prune skips unsettled, recently active, archived (unless --delete) and del
   ];
   assert.deepEqual(pruneable(threads, CUTOFF, { worker: isWorker }).map((t) => t.id), ["e"]);
   assert.deepEqual(pruneable(threads, CUTOFF, { remove: true, worker: isWorker }).map((t) => t.id), ["c", "e"]);
+});
+
+test("--main-days picks settled, quiet main threads, never workers, children, pinned, snoozed or recent ones", () => {
+  const now = Date.parse("2026-10-20T00:00:00Z");
+  const threads = [
+    thread("old-main", "Grocery list ideas"),
+    thread("override-main", "Trip planning", { settledAt: null, settledOverride: "settled" }),
+    thread("open-main", "Still talking", { settled: false, settledAt: null }),
+    thread("recent-main", "Fresh one", { updatedAt: "2026-10-15T00:00:00Z" }),
+    thread("pinned-main", "Keep me", { pinnedAt: OLD }),
+    thread("snoozed-main", "Later", { snoozedUntil: "2026-10-25T00:00:00Z" }),
+    thread("woke-main", "Snooze over", { snoozedUntil: "2026-10-05T00:00:00Z" }),
+    thread("archived-main", "Gone", { archivedAt: OLD }),
+    thread("w", "[opus] some job"),
+    thread("thread:delegated-task:command%3Axyz", "Child job"),
+  ];
+  assert.deepEqual(staleMain(threads, CUTOFF, { now, worker: (id, title) => isWorker(id, title, new Set()) }).map((t) => t.id),
+    ["old-main", "override-main", "woke-main"]);
 });
 
 test("prune archives delegate_task children that ended over --days ago, end to end on the fake T3", () => {
