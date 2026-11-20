@@ -53,7 +53,8 @@ export function usageWindows(body) {
 
 // The hub's Claude logins with their windows, primary first:
 // [{ email, priority, windows }]; a login whose read failed has windows [] and an error.
-export async function hubClaudeAccounts(hub, fetchImpl = fetch) {
+// `recent(email)`: true skips that login's usage call (withCache fills it from the cache).
+export async function hubClaudeAccounts(hub, fetchImpl = fetch, recent = () => false) {
   const key = fs.readFileSync(expand(hub.managementKeyFile), "utf8").trim();
   const base = `${normal(hub.url)}/v0/management`;
   const call = async (route, body) => {
@@ -69,6 +70,7 @@ export async function hubClaudeAccounts(hub, fetchImpl = fetch) {
   const files = ((await call("auth-files")).files ?? []).filter((f) => f.provider === "claude" && !f.disabled);
   const rows = await Promise.all(files.map(async (f, i) => {
     const row = { email: f.email ?? f.id, priority: Number(f.priority ?? 0) || 0, order: i, windows: [] };
+    if (recent(row.email)) return { ...row, skipped: true };
     try {
       const res = await call("api-call", {
         auth_index: f.auth_index,
@@ -99,12 +101,47 @@ export function applyHub(accounts, hubRows, instances, now = new Date().toISOStr
   }
 }
 
+// Anthropic's usage endpoint answers 429 when it is polled often (every pacer tick, status and other
+// readers call it), so a login whose read failed keeps its last good windows for up to CACHE_MS,
+// marked `cachedAt`. The cache file ($HUB_USAGE_CACHE, else ~/.cache/subagents/hub-usage.json)
+// holds { email: { windows, at } }.
+export const CACHE_MS = 30 * 60000;
+// A login read this recently isn't asked again: one usage call per login per READ_GAP_MS, whoever asks.
+export const READ_GAP_MS = 4 * 60000;
+const cacheFile = () => process.env.HUB_USAGE_CACHE ?? path.join(os.homedir(), ".cache", "subagents", "hub-usage.json");
+export function withCache(rows, file = cacheFile(), now = Date.now()) {
+  let cache = {};
+  try { cache = JSON.parse(fs.readFileSync(file, "utf8")) ?? {}; } catch { /* no cache yet */ }
+  let fresh = false;
+  const out = rows.map((r) => {
+    if (r.windows.length) { cache[r.email] = { windows: r.windows, at: new Date(now).toISOString() }; fresh = true; return r; }
+    const c = cache[r.email];
+    return c && now - Date.parse(c.at) < CACHE_MS ? { ...r, windows: c.windows, cachedAt: c.at } : r;
+  });
+  if (fresh) {
+    try {
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      const tmp = `${file}.${process.pid}.tmp`;
+      fs.writeFileSync(tmp, JSON.stringify(cache));
+      fs.renameSync(tmp, file);
+    } catch (err) { console.error(`hub: could not write the usage cache (${err.message})`); }
+  }
+  return out;
+}
+
+// Logins read in the last READ_GAP_MS, by the cache file.
+export function recentReads(file = cacheFile(), now = Date.now()) {
+  let cache = {};
+  try { cache = JSON.parse(fs.readFileSync(file, "utf8")) ?? {}; } catch { /* no cache yet */ }
+  return (email) => now - (Date.parse(cache[email]?.at ?? "") || 0) < READ_GAP_MS;
+}
+
 // usage.mjs entry: read the hub when accounts.local.json has one; a failure is reported, not fatal.
 export async function addHubUsage(accounts, homes) {
   const hub = hubConfig();
   if (!hub?.url || !hub?.managementKeyFile) return;
   try {
-    applyHub(accounts, await hubClaudeAccounts(hub), hubInstances(homes, hub.url));
+    applyHub(accounts, withCache(await hubClaudeAccounts(hub, fetch, recentReads())), hubInstances(homes, hub.url));
   } catch (err) {
     console.error(`hub: could not read Claude usage (${err.message})`);
   }

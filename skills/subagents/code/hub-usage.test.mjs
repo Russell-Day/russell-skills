@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { applyHub, hubClaudeAccounts, hubInstances, usageWindows } from "./hub-usage.mjs";
+import { CACHE_MS, READ_GAP_MS, applyHub, hubClaudeAccounts, hubInstances, recentReads, usageWindows, withCache } from "./hub-usage.mjs";
 
 test("usage body -> Session, Weekly and per-model weekly windows", () => {
   const w = usageWindows({
@@ -59,6 +59,11 @@ test("hub accounts: primary first by priority; a failed read keeps the row witho
   assert.equal(rows[0].windows[0].usedPercent, 2);
   assert.match(rows[2].error, /HTTP 401/);
   assert.ok(calls.every((c) => c.url.startsWith("http://hub.test/v0/management/") && c.auth === "Bearer k"));
+  // A login read recently is skipped: no usage call for it.
+  calls.length = 0;
+  const again = await hubClaudeAccounts({ url: "http://hub.test/", managementKeyFile: path.join(dir, "mgmt.key") }, fetchImpl, (email) => email === "big@example.com");
+  assert.deepEqual([again[0].email, again[0].skipped, again[0].windows], ["big@example.com", true, []]);
+  assert.equal(calls.filter((c) => c.url.endsWith("/api-call")).length, 2);
 });
 
 test("applyHub: hub instances get the primary login's windows, replacing any stale row", () => {
@@ -79,4 +84,33 @@ test("applyHub: no readable login leaves the instances alone", () => {
   const accounts = [{ instance: "lane2", windows: [{ label: "Weekly", usedPercent: 5 }] }];
   applyHub(accounts, [{ email: "x@example.com", windows: [], error: "down" }], ["lane2"]);
   assert.deepEqual(accounts, [{ instance: "lane2", windows: [{ label: "Weekly", usedPercent: 5 }] }]);
+});
+
+test("withCache: a failed read (429) keeps the login's last good windows for 30 min, marked cachedAt", () => {
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "hub-cache-")), "nested", "hub-usage.json");
+  const now = Date.parse("2026-11-20T22:00:00Z");
+  const good = [{ label: "Weekly", usedPercent: 3, resetsAt: "2026-11-23T02:00:00Z" }];
+  const first = withCache([{ email: "a@x", windows: good }, { email: "b@x", windows: [], error: "usage: HTTP 429" }], file, now);
+  assert.deepEqual(first.map((r) => [r.email, r.windows.length, r.cachedAt ?? null]), [["a@x", 1, null], ["b@x", 0, null]], "nothing cached for b yet");
+  const later = withCache([{ email: "a@x", windows: [], error: "usage: HTTP 429" }], file, now + CACHE_MS - 60000);
+  assert.deepEqual(later[0].windows, good);
+  assert.equal(later[0].cachedAt, new Date(now).toISOString());
+  assert.equal(later[0].error, "usage: HTTP 429");
+  const stale = withCache([{ email: "a@x", windows: [], error: "usage: HTTP 429" }], file, now + CACHE_MS + 60000);
+  assert.deepEqual(stale[0].windows, [], "older than 30 min: dropped");
+  // A bad cache file is ignored, not fatal.
+  fs.writeFileSync(file, "{not json");
+  assert.deepEqual(withCache([{ email: "a@x", windows: [] }], file, now)[0].windows, []);
+});
+
+test("recentReads: a login read under 4 min ago is skipped, and withCache fills it from the cache", () => {
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "hub-cache-")), "hub-usage.json");
+  const now = Date.parse("2026-11-20T22:00:00Z");
+  const good = [{ label: "Weekly", usedPercent: 3, resetsAt: "2026-11-23T02:00:00Z" }];
+  withCache([{ email: "a@x", windows: good }], file, now);
+  assert.equal(recentReads(file, now + READ_GAP_MS - 1000)("a@x"), true);
+  assert.equal(recentReads(file, now + READ_GAP_MS + 1000)("a@x"), false);
+  assert.equal(recentReads(file, now)("b@x"), false, "never read");
+  const filled = withCache([{ email: "a@x", windows: [], skipped: true }], file, now + 60000);
+  assert.deepEqual(filled[0].windows, good);
 });
