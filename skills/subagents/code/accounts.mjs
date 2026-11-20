@@ -32,6 +32,10 @@ export const claude = {
   t3WorkerInstance: raw.claude.t3WorkerInstance ?? raw.claude.t3Instance,
   // Instance whose usage probe the pacer reads (default t3Instance): another instance on the same login.
   usageInstance: raw.claude.usageInstance ?? raw.claude.t3Instance,
+  t3HaikuInstance: raw.claude.t3HaikuInstance ?? null,
+  // Second Claude account the pacer runs beside the main one: { name, t3Instance, t3WorkerInstance,
+  // t3HaikuInstance }, or null. Its threads don't spend the main window (pacer "Second account").
+  second: raw.claude.second ?? null,
   // Overflow account: main-account T3 instance -> the instance of a second Claude account that
   // carries threads the main account's usage limit stopped, until its reset (pacer). {} = off.
   overflow: raw.claude.overflow ?? {},
