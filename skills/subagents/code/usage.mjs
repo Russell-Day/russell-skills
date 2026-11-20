@@ -15,7 +15,8 @@
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
-import { applyClaudeLogs, latestClaudeWindows } from "./claude-logs.mjs";
+import { applyClaudeLogs, claudeHomes, latestClaudeWindows } from "./claude-logs.mjs";
+import { addHubUsage } from "./hub-usage.mjs";
 import { codexAccount, pickCodex } from "./accounts.mjs";
 import { t3Connect } from "./t3-api.mjs";
 
@@ -49,6 +50,8 @@ const accounts = config.providers
 // T3's Claude probe goes stale (0%, no reset time); the thread logs carry the live numbers.
 applyClaudeLogs(accounts, latestClaudeWindows());
 for (let i = accounts.length - 1; i >= 0; i--) if (!accounts[i].windows.length) accounts.splice(i, 1);
+// Claude instances that run through a CLIProxyAPI hub: windows from the hub (hub-usage.mjs).
+await addHubUsage(accounts, claudeHomes());
 
 // --pick-codex <model-id> [--exclude a,b]: print the Codex account to use
 // (rules in accounts.mjs pickCodex). Accounts that already hit a limit this
