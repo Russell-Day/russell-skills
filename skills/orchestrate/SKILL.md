@@ -220,7 +220,8 @@ A worker past 3 compactions gets no new round: `CONTINUE=1` (or a project's
 brief and findings. A stage whose first turn compacts 3+ times was too big:
 split what's left. Then a targeted recheck on the **same reviewer thread**
 with the subagents `recheck-prompt.md` (`ATTACH=<review thread> CONTINUE=1`),
-naming only the open finding ids.
+naming only the open finding ids. When the fix changed code, the recheck
+reruns the stage's tests on the fixed copy, so its APPROVE covers the commit.
 
 **Budget** (adapted from t3dotgg's sol-loop): Codex rounds are the scarcest spend.
 - **3 review rounds per stage** (review + rechecks). Up to **5** only while a
@@ -247,7 +248,10 @@ naming only the open finding ids.
 ## 10. Commit
 
 One stage per commit, on APPROVE (or at budget end with every open id
-disputed), by the lead (workers never commit). When the tree holds other
+disputed), by the lead (workers never commit). Don't rerun the stage's tests
+when the APPROVE packet shows them passing and the stage files still match the
+reviewed copy (`cmp` each one); rerun them when you edited anything after the
+review or the copy is gone. When the tree holds other
 stages' or sessions' WIP, commit from a **private index with a HEAD check**,
 so a commit from another session in between is not rolled back:
 

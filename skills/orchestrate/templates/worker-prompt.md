@@ -56,7 +56,10 @@ Two habits that catch what reviewers otherwise find by hand:
   uncommitted and list every file, untracked included.
 - No helpers or subagents: search, read and test yourself.
 - Tests: while working, run only the tests for what you changed; run the wider
-  suite under Verify once, at the end, before your packet.
+  suite under Verify once, at the end, before your packet. A failure you think
+  was already there: check the project's test-run log first if its rules name
+  one, and cite it instead of rerunning on a clean copy; rerun only when the
+  log can't tell.
 - Message board (`~/.agents/skills/message-board`): post one status card at
   start, check `read --unread` at stage boundaries, mark done at the end.
   Questions for the lead go `--to <lead id>`. If you learned something the
