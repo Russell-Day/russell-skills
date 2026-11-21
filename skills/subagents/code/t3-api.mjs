@@ -65,6 +65,11 @@ const apiChanged = (detail) => new Error(`T3 API changed (server ${t3Version()})
 // with the first chunk of a stream (`stream: true`, e.g. subscribeThread's snapshot).
 // A server that isn't up throws an error with `notRunning: true` ("T3 not running (…)").
 const notRunning = (why) => Object.assign(new Error(`T3 not running (${why})`), { notRunning: true });
+// A caller may hand over a long-lived token in T3_SESSION_TOKEN (minted once by a long-running
+// parent) to skip the per-call `t3 auth session issue` spawn. If the server refuses that token,
+// the error carries `tokenRejected: true` and starts with TOKEN_REJECTED_TEXT, so the parent can
+// mint a fresh one and retry.
+export const TOKEN_REJECTED_TEXT = "T3 token rejected";
 export async function t3Connect(label = "agent skill") {
   let runtime;
   try { runtime = JSON.parse(fs.readFileSync(path.join(userdata, "server-runtime.json"), "utf8")); }
@@ -72,7 +77,8 @@ export async function t3Connect(label = "agent skill") {
   const base = `http://127.0.0.1:${runtime.port}`;
   const budget = t3Timeouts().api, end = Date.now() + budget;
   const left = () => Math.max(1, end - Date.now());
-  const token = runFor("connect (token)", budget, "t3", ["auth", "session", "issue", "--token-only", "--ttl", "5m", "--label", label], { encoding: "utf8" }).trim();
+  const envToken = process.env.T3_SESSION_TOKEN?.trim();
+  const token = envToken || runFor("connect (token)", budget, "t3", ["auth", "session", "issue", "--token-only", "--ttl", "5m", "--label", label], { encoding: "utf8" }).trim();
   let res;
   try { res = await fetch(`${base}/api/auth/websocket-ticket`, { method: "POST", headers: { authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(left()) }); }
   catch (e) {
@@ -80,6 +86,7 @@ export async function t3Connect(label = "agent skill") {
     if (e.cause?.code === "ECONNREFUSED") throw notRunning(`connection refused on port ${runtime.port}`);
     throw new Error(`T3 server not reachable on port ${runtime.port}: ${e.cause?.message ?? e.message}`);
   }
+  if ((res.status === 401 || res.status === 403) && envToken) throw Object.assign(new Error(`${TOKEN_REJECTED_TEXT}: websocket ticket HTTP ${res.status} with T3_SESSION_TOKEN`), { tokenRejected: true });
   if (res.status === 401 || res.status === 403) throw apiChanged(`websocket ticket: HTTP ${res.status} (the server refused the \`t3 auth session issue\` token; is t3.real on the server's runtime?)`);
   if (!res.ok) throw new Error(`websocket ticket: HTTP ${res.status}`);
   let ticket;
