@@ -32,14 +32,14 @@ already built it. Read `local.md` next to this file first if it exists.
 
 ## 3. Keep the credit
 
-- Keep Git authorship and any existing `Co-Authored-By:` trailers. Cherry-pick
-  and rebase keep the author. Don't squash other people's commits into yours.
+- Keep Git authorship: cherry-pick and rebase keep the author. Don't squash
+  other people's commits into yours. Don't add `Co-Authored-By:` lines: new
+  commits credit only the user, and a global git hook blocks other credit lines.
 - The PR description credits the original contributors and links the
   original PR when there is one.
-- If the work will be squashed, carry the human authors and co-authors into
-  the merge commit as `Co-Authored-By:` trailers. Use verified identities
-  from `git log --format='%an <%ae>'` or the PR's commits, never guessed
-  emails.
+- If the work will be squashed, name the human authors in the PR description
+  instead of commit trailers. Use verified identities from
+  `git log --format='%an <%ae>'` or the PR's commits, never guessed emails.
 - Model attribution doesn't replace contributor credit. Keep both.
 
 ## 4. Update and finish
