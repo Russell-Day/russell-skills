@@ -269,12 +269,14 @@ unset GIT_INDEX_FILE; rm -f /tmp/<plan>/idx-<stage>-*
 git show --stat HEAD      # only the stage's files
 ```
 
-Message: `feat(<plan> <stage>): <what the user gets>`, body with the item ids.
-Commits credit only the user: no `Co-Authored-By:`, `Reviewed-by:` or
-"Generated with" line for any model (a global git hook blocks them). The
-review verdict lives in `closed.md` (`closed: done <sha>`, at a budget end
-`closed: done <sha> (disputed F2 F5)`). With a clean tree a plain
-`git add <files> && git commit -- <files>` is fine.
+Message: `feat(<plan> <stage>): <what the user gets>`, body with the item ids
+and one plain credit line naming the models and review rounds, e.g. `Done with
+Claude Opus 5.5; reviews: S1 4 rounds terra61, S2 3 rounds terra61, final
+sol62 2 rounds (APPROVE)` (at a budget end: `… terra61 REVISE, disputed F2
+F5`, plus `closed.md` `closed: done <sha> (disputed …)`). Never a
+`Co-Authored-By:` line for a model: GitHub would list it as a contributor, and
+a global git hook refuses it. With a clean tree a plain `git add <files> &&
+git commit -- <files>` is fine.
 
 To test the private tree first, export it (`git checkout-index -a
 --prefix=/tmp/<plan>/verify-<stage>/` with `GIT_INDEX_FILE` still set) and run
