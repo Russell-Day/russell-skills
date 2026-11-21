@@ -115,7 +115,25 @@ project's own tokens, fonts, components and rules (its UI skill wins on
 conflicts). In the final report, name which reference each main decision came
 from.
 
-## 6. Found something really good?
+## 6. Brief with a spec, check the tells
+
+Advice from Contra Labs' design studies (https://contralabs.com/), not law:
+
+- **Spec, not mood.** A model shipped 72% of pages a designer would present
+  when given a spec, against 31% when given a mood ("clean, modern"). When you
+  brief a builder (yourself, a subagent, a mockup), write like a creative
+  director handing off to a junior designer: the palette and type to use, 3-5
+  explicit don'ts, spacing and density, motion durations in ms, and which
+  references above to borrow from. Keep it short.
+- **The first prompt matters most.** Put the spec in the first brief; asking
+  again more firmly rarely fixes a miss, and "reconsider" reads as "discard".
+- **AI tells.** Check the result for an arrow on every link, small-caps
+  eyebrows over headings, everything centred, em dashes in UI copy, and soft
+  gradients or pastel glass nobody chose. Each one is an issue.
+- **Severity.** Grade each issue: minor = wouldn't stop you presenting it,
+  major = needs rework before showing, blocker = can't be shown.
+
+## 7. Found something really good?
 
 If a reference you found is worth keeping for next time, add it to the user's
 collection if a save route exists in your tools (for example a save tool
@@ -129,5 +147,7 @@ save it.
 - [ ] `design_refs_search` tried (or noted as unavailable)
 - [ ] 3-4 shots looked at; blocked/login-wall shots dropped
 - [ ] One side-by-side image with a borrow line per reference, shown
+- [ ] Brief carried a spec (palette, type, don'ts, spacing, motion in ms, refs)
 - [ ] Built in the project's own tokens; report says what came from where
+- [ ] Result checked for AI tells; issues graded minor / major / blocker
 - [ ] Really good finds listed under "Worth saving"
