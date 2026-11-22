@@ -381,3 +381,91 @@ def test_backfill_skips_tied_plans_and_reads_sender_plan(root, tmp_path):
     with db(root) as con:
         areas = dict(con.execute('SELECT id, area FROM posts').fetchall())
     assert areas[tied] is None and areas[by_sender] == 'calendar-sync'
+
+
+def board_module():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location('board_under_test', BOARD)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+TIRED_LAST, TIRED_MOST = board_module().TIRED_LAST, board_module().TIRED_MOST
+
+
+def answered_briefs(root, area, n, helped_post=None):
+    """n briefs for `area`, each marked --none (or, for the last one, helped by `helped_post`)."""
+    for i in range(n):
+        bid = brief_id(run(root, 'brief', '--agent', f'w{i}', '--area', area).stdout)
+        if helped_post is not None and i == n - 1:
+            js(root, 'helped', '--agent', f'w{i}', '--brief', bid, '--posts', helped_post)
+        else:
+            js(root, 'helped', '--agent', f'w{i}', '--brief', bid, '--none')
+
+
+def shown(root, area):
+    out = run(root, 'brief', '--agent', 'next', '--area', area).stdout
+    row = brief_row(root, brief_id(out))
+    return out, [int(x) for x in board_module().comma_list(row['post_ids'])], board_module().comma_list(row['note_slugs'])
+
+
+def test_brief_leaves_out_a_post_and_note_that_keep_not_helping(root):
+    stale = post(root, topic='old gotcha', body='an old gotcha nobody needs', area='mail-sync')
+    answered_briefs(root, 'mail-sync', TIRED_MOST)
+    fresh = post(root, topic='new finding', body='a new finding', area='mail-sync')
+    out, posts, notes = shown(root, 'mail-sync')
+    assert stale not in posts and fresh in posts
+    assert notes == [] and 'Polling only' not in out  # the note was in every --none brief too
+    assert f'#{stale}' in out and 'note mail-sync (`notes show mail-sync`)' in out
+    assert f'Left out (marked --none in {TIRED_MOST} of their last {TIRED_LAST} briefs)' in out
+    assert len(out) - 1 <= 1500 * 4  # the cap still holds
+
+
+def test_one_helped_brief_in_the_window_keeps_everything(root):
+    # Sibling case: another area and wording; one brief of the window helped (by another post).
+    (root / 'notes' / 'calendar-sync.md').write_text(NOTE.replace('Mail sync', 'Calendar sync'))
+    kept = post(root, topic='tz bug', body='calendar times shift an hour in March', area='calendar-sync')
+    other = post(root, topic='ics parse', body='recurring events need RRULE', area='calendar-sync')
+    answered_briefs(root, 'calendar-sync', TIRED_MOST, helped_post=other)
+    out, posts, notes = shown(root, 'calendar-sync')
+    assert kept in posts and other in posts and notes == ['calendar-sync'] and 'Left out' not in out
+
+
+def test_unanswered_briefs_do_not_count(root):
+    p = post(root, body='a finding', area='mail-sync')
+    for i in range(TIRED_LAST + 2):
+        run(root, 'brief', '--agent', f'u{i}', '--area', 'mail-sync')
+    answered_briefs(root, 'mail-sync', TIRED_MOST - 1)
+    _, posts, notes = shown(root, 'mail-sync')
+    assert p in posts and notes == ['mail-sync']
+
+
+def test_a_reply_an_upvote_or_a_note_edit_brings_it_back(root):
+    replied = post(root, topic='first', body='first finding', area='mail-sync')
+    upvoted = post(root, topic='second', body='second finding', area='mail-sync')
+    answered_briefs(root, 'mail-sync', TIRED_MOST)
+    _, posts, notes = shown(root, 'mail-sync')
+    assert replied not in posts and upvoted not in posts and notes == []
+    post(root, topic='Re: first', body='still true after the rewrite', reply_to=replied)
+    js(root, 'helped', '--agent', 'x', '--posts', upvoted)  # a free upvote, no brief
+    note = root / 'notes' / 'mail-sync.md'
+    note.write_text(NOTE.replace('Polling only', 'Push now'))
+    now = time.time()  # after every brief above (an mtime in the future would read as not known yet)
+    os.utime(note, (now, now))
+    out, posts, notes = shown(root, 'mail-sync')
+    assert replied in posts and upvoted in posts and notes == ['mail-sync'] and 'Push now' in out
+
+
+def test_tired_items_judges_as_of_a_past_moment(root):
+    p = post(root, body='a finding', area='mail-sync')
+    before = time.time()
+    answered_briefs(root, 'mail-sync', TIRED_MOST)
+    board = board_module()
+    con = board.connect(root)
+    try:
+        assert board.tired_items(con, root, before=before) == ({}, {})
+        posts, notes = board.tired_items(con, root)
+        assert posts == {p: (TIRED_MOST, TIRED_MOST)} and notes == {'mail-sync': (TIRED_MOST, TIRED_MOST)}
+    finally:
+        con.close()

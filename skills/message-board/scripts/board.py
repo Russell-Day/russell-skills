@@ -300,8 +300,75 @@ def is_status(post):
     return bool(STATUS_RE.search(head)) or 'VERDICT:' in (post['body'] or '')
 
 
+# A note or post keeps not helping when TIRED_MOST of the last TIRED_LAST answered briefs that showed it
+# were marked --none (nothing in them helped): the brief leaves it out and names it on one line instead.
+# Most briefs end --none anyway (about 7 in 10), so a simple majority catches posts that do help; replaying
+# a week of briefs, 8 of 8 lost about 1 in 140 helped briefs, 3 of 5 lost 1 in 7.
+TIRED_LAST = 8
+TIRED_MOST = 8
+
+
+def tired_items(db, root, before=None):
+    """({post id: (none, answered)}, {note slug: (none, answered)}) for items marked --none in at least
+    TIRED_MOST of the last TIRED_LAST answered briefs that showed them, and (posts) not marked helped since
+    the first of those. Only briefs after the item last changed count: a thread replied to (or a note edited)
+    since starts fresh. `before` (epoch) judges as of that moment, from what was known then."""
+    before = time.time() if before is None else before
+    verdicts = {}
+    for r in db.execute('SELECT brief, verdict FROM helped WHERE brief IS NOT NULL AND created < ?', (before,)):
+        verdicts[r['brief']] = 'helped' if r['verdict'] == 'helped' or verdicts.get(r['brief']) == 'helped' else 'none'
+    parent = {r['id']: (r['reply_to'], r['created'])
+              for r in db.execute('SELECT id, reply_to, created FROM posts WHERE created < ?', (before,))}
+    changed = {}  # thread root -> newest reply
+    for pid, (_up, created) in parent.items():
+        top, seen = pid, {pid}
+        while parent[top][0] in parent and parent[top][0] not in seen:  # to the root, as thread_root does
+            top = parent[top][0]
+            seen.add(top)
+        if top != pid:
+            changed[top] = max(changed.get(top, 0), created)
+    folder = root / 'notes'
+    for p in folder.glob('*.md') if folder.is_dir() else ():
+        mtime = p.stat().st_mtime
+        if mtime < before:  # an edit after `before` was not known then
+            changed[p.stem] = mtime
+    last_helped = {}
+    for r in db.execute("SELECT post, max(created) FROM helped WHERE verdict='helped' AND post IS NOT NULL "
+                        'AND created < ? GROUP BY post', (before,)):
+        last_helped[r[0]] = r[1]
+    windows = {}  # ('post', id) | ('note', slug) -> [(created, verdict)], newest first
+    for b in db.execute('SELECT id, post_ids, note_slugs, created FROM briefs WHERE created < ? '
+                        'ORDER BY created DESC, id DESC', (before,)):
+        verdict = verdicts.get(b['id'])
+        if verdict is None:
+            continue
+        items = [('post', int(x)) for x in comma_list(b['post_ids'])] + [('note', s) for s in comma_list(b['note_slugs'])]
+        for item in items:
+            win = windows.setdefault(item, [])
+            if len(win) < TIRED_LAST and b['created'] > changed.get(item[1], 0):
+                win.append((b['created'], verdict))
+    posts, notes_ = {}, {}
+    for (kind, key), win in windows.items():
+        nones = sum(1 for _, v in win if v == 'none')
+        if nones < TIRED_MOST or (kind == 'post' and last_helped.get(key, 0) >= win[-1][0]):
+            continue
+        (posts if kind == 'post' else notes_)[key] = (nones, len(win))
+    return posts, notes_
+
+
+def tired_line(posts, notes_):
+    """One line naming what the brief left out, so a worker can still read it."""
+    if not posts and not notes_:
+        return ''
+    parts = [f'note {s} (`notes show {s}`)' for s in notes_]
+    if posts:
+        parts.append('posts ' + ', '.join(f'#{p}' for p in posts) + ' (`thread <id>`)')
+    return f'Left out (marked --none in {TIRED_MOST} of their last {TIRED_LAST} briefs): ' + '; '.join(parts)
+
+
 def brief(db, args):
-    """Context block for a worker: area note summaries + the most helped findings, newest first; logged in briefs."""
+    """Context block for a worker: area note summaries + the most helped findings, newest first; logged in briefs.
+    Notes and posts that keep not helping (tired_items) are left out and named on one line."""
     areas = [check_area(a) for a in comma_list(args.area)]
     files = comma_list(args.files)
     if not areas:
@@ -316,23 +383,15 @@ def brief(db, args):
     foot = (f'Brief #{brief_id}: when done, run board.py helped --agent {args.agent} --brief {brief_id} '
             f'--posts <ids> (or --none)' + (f'\n{IMPROVE_LINE}' if IMPROVE_LINE else ''))
     notes_, posts_ = [], []  # (note slug or None, text), (post id, text)
+    tired_posts, tired_notes = tired_items(db, args.root)
+    left_out = ''
 
     def render():
         return '\n'.join([head, *(t for _, t in notes_), BRIEF_POSTS_HEAD,
-                          *([t for _, t in posts_] or [BRIEF_NO_POSTS]), foot])
+                          *([t for _, t in posts_] or [BRIEF_NO_POSTS]), *([left_out] if left_out else []), foot])
 
     if len(render()) > cap:  # very long --files list: shorten the heading
         head = clip(head, max(len(head) - (len(render()) - cap), 20))
-    # Notes (known ones and one line for unknown areas) share at most two thirds of the room left: the
-    # note is what leads find useful; posts fill what the notes leave.
-    known = [a for a in areas if (args.root / 'notes' / f'{a}.md').exists()]
-    unknown = [a for a in areas if a not in known]
-    items = len(known) + (1 if unknown else 0)
-    each = (cap - len(render())) * 2 // 3 // items - 1  # -1: its newline
-    for area in known:
-        notes_.append((area, clip(f"Note {area}:\n{note_summary(args.root / 'notes' / f'{area}.md')}", each)))
-    if unknown:
-        notes_.append((None, clip(f"(no note for area {', '.join(unknown)}; `notes list` shows them)", each)))
     # Candidate threads: posts in these areas or naming these files, each counted once at its root.
     pattern = file_pattern(files)
     roots = {}
@@ -340,6 +399,22 @@ def brief(db, args):
         if post['area'] in areas or (pattern and pattern.search(f"{post['topic']}\n{post['body']}")):
             root = thread_root(db, post)
             roots.setdefault(root['id'], root)
+    known = [a for a in areas if (args.root / 'notes' / f'{a}.md').exists()]
+    skipped_notes = [a for a in known if a in tired_notes]
+    known = [a for a in known if a not in tired_notes]
+    skipped_posts = sorted((i for i in roots if i in tired_posts), reverse=True)
+    roots = {i: p for i, p in roots.items() if i not in tired_posts}
+    if skipped_notes or skipped_posts:
+        left_out = clip(tired_line(skipped_posts, skipped_notes), max(cap // 8, 80))
+    # Notes (known ones and one line for unknown areas) share at most two thirds of the room left: the
+    # note is what leads find useful; posts fill what the notes leave.
+    unknown = [a for a in areas if a not in known and a not in skipped_notes]
+    items = len(known) + (1 if unknown else 0)
+    each = (cap - len(render())) * 2 // 3 // max(items, 1) - 1  # -1: its newline
+    for area in known:
+        notes_.append((area, clip(f"Note {area}:\n{note_summary(args.root / 'notes' / f'{area}.md')}", each)))
+    if unknown:
+        notes_.append((None, clip(f"(no note for area {', '.join(unknown)}; `notes list` shows them)", each)))
     votes = dict(db.execute("SELECT post, count(*) FROM helped WHERE verdict='helped' AND post IS NOT NULL GROUP BY post").fetchall())
     status = {i: is_status(p) for i, p in roots.items()}
     ranked = sorted(roots.values(), key=lambda p: (-votes.get(p['id'], 0), status[p['id']], -p['created'], -p['id']))
