@@ -124,8 +124,10 @@ decisions, owned files and the other stages' WIP, input → expected output,
 foreground tests, no stash or commit, no helpers, the packet and `VERDICT:`;
 add the project's hard rules), and launch it: T3's `delegate_task` by default
 (subagents "Dispatch": clientRequestId `<prefix><stage>-impl-r1`, fix rounds
-by `t3_thread_send`). The `t3-thread.mjs` fallback, also the JOB naming
-reference:
+by `t3_thread_send`). When the goal is a measured number (a score, a latency,
+a cost), the prompt opens with its line from the source, quoted, and the
+number to beat: a paraphrase drifts with each hand-off. The `t3-thread.mjs`
+fallback, also the JOB naming reference:
 
 ```bash
 # one Bash call each, run_in_background: true (no trailing &), so its exit wakes you;
@@ -238,6 +240,9 @@ reruns the stage's tests on the fixed copy, so its APPROVE covers the commit.
   Never agree just to end the loop.
 - **No round for small stuff.** Nits-only means stop. Declined nits and
   doc/comment-only fixes get no recheck: verify them yourself and close.
+  When the stage's goal is a measured number, an optional performance-only
+  finding whose fix can move it less than the run-to-run noise counts as a nit.
+  Correctness, security and data-loss findings keep their severity and recheck.
 - **If review grew the diff, cut first** (code, tests or guards the intent
   doesn't need) before the next round.
 - **At budget end** fix what you agree with. If every open id is disputed with

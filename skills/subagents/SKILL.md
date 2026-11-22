@@ -150,6 +150,12 @@ the edge cases a review exists to catch.
   isn't sent explorers.
 - **Tell every explorer to read live data** read-only (logs, databases, data dirs),
   not only the code.
+- **Ask for a verdict per finding, and a number where it is measurable:** its
+  effect (measured, with the source and run count; estimated and marked so; or
+  marked unknown) and a recommendation: do it, test it ourselves, or drop it and
+  why. "Is X faster or better" is measured on the real target (the production
+  scorer, the device, live data) where that is available and appropriate, and
+  the report says which target or proxy it used.
 
 Then reconcile the answers:
 - **Where they agree,** it's likely right. Still spot-check the line refs.

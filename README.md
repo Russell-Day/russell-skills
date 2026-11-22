@@ -13,6 +13,7 @@ and keep track of it. I use them every day, and they work in any repo.
 | [pacing](skills/pacing/SKILL.md) | Before you start more workers, checks whether you are using up your 5-hour or weekly usage too fast. |
 | [council](skills/council/SKILL.md) | Has three models score a piece of work, and repeats until all three give it 9/10. Based on the council skill in Theo Browne's [tstack](https://github.com/t3dotgg/tstack). |
 | [message-board](skills/message-board/SKILL.md) | Lets agent chats that run in parallel share findings through a local SQLite board. |
+| [competitions](skills/competitions/SKILL.md) | A playbook for timed coding competitions and hackathons run by an agent team: what pays, which tracks to work, measuring on the real scorer, and prompt templates. |
 | [takeover](skills/takeover/SKILL.md) | Finishes another agent's PR or branch and keeps the original authors' credit. |
 | [go-public](skills/go-public/SKILL.md) | Helps you take a private repo public. It finds personal details for you to remove, checks the whole git history for leaks, and sets up a watcher for new issues. |
 
