@@ -366,12 +366,62 @@ const cmd = (send, label, c) => send({ commandId: randomUUID(), ...c }, label);
 // reply of theirs is told apart. Resolves with the message id (pass `messageId` to make
 // a retry idempotent).
 const DISPATCH = { auto: { dispatchMode: { type: "start_immediately" }, deliveryIntent: "auto" }, queue: { dispatchMode: { type: "queue_after_active" } }, start: { dispatchMode: { type: "start_immediately" } } };
-export async function sendMessage(threadId, text, { mode = "auto", createdBy = "agent", messageId = randomUUID(), modelSelection, label = "send message" } = {}, send = t3Command) {
+//
+// `keepBusyProvider`: a thread moved to another account of the same provider (the pacer's account
+// moves) can still have its old account's session running background agents or commands; T3 then
+// refuses a turn that would switch to the new account (BACKGROUND_BUSY). With this set, that
+// refusal sends the message once more on the account the conversation is still on, so the
+// message gets through and the move happens on a later turn. Only for a same-provider move;
+// any other refusal is thrown as is.
+export const BACKGROUND_BUSY = /still running background agents or commands/i;
+export async function sendMessage(threadId, text, { mode = "auto", createdBy = "agent", messageId = randomUUID(), modelSelection, label = "send message", keepBusyProvider = false, query = t3Query } = {}, send = t3Command) {
   if (!DISPATCH[mode]) throw new Error(`sendMessage mode is ${Object.keys(DISPATCH).join(", ")}`);
   if (!text?.trim()) throw new Error("sendMessage needs text");
   if (!["user", "agent"].includes(createdBy)) throw new Error(`sendMessage createdBy is user or agent, got ${createdBy}`);
-  await cmd(send, label, { type: "message.dispatch", createdBy, creationSource: "server", threadId, messageId, text, attachments: [], ...DISPATCH[mode], ...(modelSelection ? { modelSelection } : {}) });
+  const command = { type: "message.dispatch", createdBy, creationSource: "server", threadId, messageId, text, attachments: [], ...DISPATCH[mode], ...(modelSelection ? { modelSelection } : {}) };
+  try {
+    await cmd(send, label, command);
+  } catch (err) {
+    const kept = keepBusyProvider && BACKGROUND_BUSY.test(err?.message ?? "") ? busyProviderSelection(threadId, modelSelection, query) : null;
+    if (!kept) throw err;
+    await cmd(send, `${label} (kept on ${kept.instanceId}: its background work still runs)`, { ...command, modelSelection: kept });
+  }
   return messageId;
+}
+
+// The provider instance a message continues, by T3's conversationProviderThread: the thread's
+// active provider thread, unless a scheduled fresh-context run started that one; then the latest
+// root provider thread past the context boundary that no such run started (else the active one).
+export function conversationInstance(threadId, query = t3Query) {
+  const threads = query("select p.provider_instance_id as instance, p.first_run_ordinal as first, p.last_run_ordinal as last, p.owner_node_id as owner,"
+    + " p.provider_thread_id = t.active_provider_thread_id as active from orchestration_v2_projection_threads t"
+    + " join orchestration_v2_projection_provider_threads p on p.thread_id = t.thread_id where t.thread_id = ?", [threadId]);
+  const active = threads.find((p) => p.active);
+  if (!active) return null;
+  const fresh = query("select r.ordinal, r.status, json_extract(r.payload_json, '$.startedAt') as started, exists (select 1 from orchestration_v2_projection_turn_items i"
+    + " where i.thread_id = r.thread_id and i.type = 'user_message' and json_extract(i.payload_json, '$.messageId') = json_extract(r.payload_json, '$.userMessageId')"
+    + " and json_extract(i.payload_json, '$.scheduledTaskId') is not null) as scheduled"
+    + " from orchestration_v2_projection_runs r where r.thread_id = ? and json_extract(r.payload_json, '$.freshContext') = 1", [threadId]);
+  const scheduledStarts = new Set(fresh.filter((r) => r.scheduled).map((r) => r.ordinal));
+  const bySchedule = (p) => scheduledStarts.has(p.first);
+  if (!bySchedule(active)) return active.instance ?? null;
+  const boundary = Math.max(0, ...fresh.filter((r) => !r.scheduled && r.status !== "queued" && !(r.status === "cancelled" && r.started == null)).map((r) => r.ordinal));
+  const predates = (p) => boundary > 0 && (p.first == null || p.first < boundary);
+  const [latest] = threads.filter((p) => p.owner == null && p.last != null && !predates(p) && !bySchedule(p)).sort((a, b) => (b.last ?? 0) - (a.last ?? 0));
+  return (latest ?? active).instance ?? null;
+}
+
+// The selection that keeps a thread on the account its conversation still runs on
+// (conversationInstance), with the wanted model; null when that is already the wanted instance,
+// unknown, or another provider (a gpt- model on one side only).
+export function busyProviderSelection(threadId, wanted, query = t3Query) {
+  const instance = conversationInstance(threadId, query);
+  const want = wanted ?? getThread(threadId, query)?.modelSelection;
+  if (!instance || !want?.model || want.instanceId === instance) return null;
+  const [last] = query("select json_extract(payload_json, '$.modelSelection.model') as model from orchestration_v2_projection_runs"
+    + " where thread_id = ? and provider_instance_id = ? order by ordinal desc limit 1", [threadId, instance]);
+  if (!last?.model || want.model.startsWith("gpt-") !== last.model.startsWith("gpt-")) return null;
+  return { ...want, instanceId: instance };
 }
 
 // Interrupt the thread's newest running run; resolves with its id, or null when nothing runs.

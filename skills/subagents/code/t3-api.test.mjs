@@ -14,7 +14,7 @@ const JOBS_TMP = fs.mkdtempSync(path.join(os.tmpdir(), "t3-api-jobs-"));
 process.env.AGENT_JOBS_DIR = JOBS_TMP;
 const registryLines = () => { try { return fs.readFileSync(mainThreadsFile(), "utf8").trim().split("\n").filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
 const withoutAt = (lines) => lines.map(({ at, ...l }) => l);
-import { abandonThread, createMainThread, currentThread, mainThreadRoles, mainThreadsFile, recordMainThread, recordMissingMainThread, getThread, interruptThread, isWorker, jobThreadIds, mainModelSelection, orchestratorArgs, projectFor, renameThread, sendMessage, snoozeThread, workerThreadTitle } from "./t3-api.mjs";
+import { abandonThread, busyProviderSelection, conversationInstance, createMainThread, currentThread, mainThreadRoles, mainThreadsFile, recordMainThread, recordMissingMainThread, getThread, interruptThread, isWorker, jobThreadIds, mainModelSelection, orchestratorArgs, projectFor, renameThread, sendMessage, snoozeThread, workerThreadTitle } from "./t3-api.mjs";
 
 test("TITLE worker: the title is the fix (with a model hint), never \"[model] job\"", () => {
   assert.equal(workerThreadTitle({ model: "opus", job: "p65-s3-impl", title: "Board lanes, priority tags" }), "[opus] Board lanes, priority tags");
@@ -242,6 +242,51 @@ test("sendMessage: message.dispatch with T3's required keys; auto steers or queu
   assert.equal(sent[2].messageId, "m9");
   await assert.rejects(sendMessage("t1", "x", { mode: "steer" }, send), /mode/);
   await assert.rejects(sendMessage("t1", "x", { createdBy: "bot" }, send), /createdBy/);
+});
+
+test("sendMessage keepBusyProvider: a refused account move goes out once more on the account still running", async () => {
+  const busy = new Error('T3 action failed: message.dispatch {"cause":"The previous provider is still running background agents or commands, and switching would end them."}');
+  const mei = { instanceId: "claudeAgent_mei", model: "claude-opus-5-5", options: [{ id: "effort", value: "high" }] };
+  // A fake state DB: the thread's provider threads, its fresh-context runs, each instance's last model.
+  const fakeDb = ({ providerThreads, fresh = [], models }) => (sql, params = []) => {
+    if (/join orchestration_v2_projection_provider_threads/.test(sql)) return providerThreads;
+    if (/freshContext/.test(sql)) return fresh;
+    if (/modelSelection.model/.test(sql)) return models[params[1]] ? [{ model: models[params[1]] }] : [];
+    return [{ thread_id: "t1", payload_json: JSON.stringify({ id: "t1", title: "T", modelSelection: mei }), run_status: "completed", run_id: "r1", active_run_id: null }];
+  };
+  const models = { claude_personal: "claude-opus-5-5", claudeAgent_mei: "claude-opus-5-5", codex: "gpt-6-sol" };
+  // The conversation is still on claude_personal (its last run there ran Opus).
+  const query = fakeDb({ providerThreads: [{ instance: "claude_personal", first: 4, last: 10, owner: null, active: 1 }, { instance: "claudeAgent_mei", first: 1, last: 3, owner: null, active: 0 }], models });
+  const sent = [];
+  const refuseMei = async (c) => { sent.push(c); if ((c.modelSelection?.instanceId ?? "claudeAgent_mei") === "claudeAgent_mei") throw busy; };
+  // No selection given: the thread's own (mei) is refused, so it goes on claude_personal with the same model.
+  const id = await sendMessage("t1", "Restarted tedi now!", { createdBy: "user", keepBusyProvider: true, query }, refuseMei);
+  assert.equal(sent.length, 2);
+  assert.deepEqual(sent[1].modelSelection, { ...mei, instanceId: "claude_personal" });
+  assert.equal(sent[1].messageId, id);
+  assert.notEqual(sent[1].commandId, sent[0].commandId); // T3 replays a refused command id
+  // Without the option, or for any other refusal, the error stands and nothing is resent.
+  sent.length = 0;
+  await assert.rejects(sendMessage("t1", "x", { query }, refuseMei), /background agents/);
+  assert.equal(sent.length, 1);
+  sent.length = 0;
+  await assert.rejects(sendMessage("t1", "x", { keepBusyProvider: true, query }, async (c) => { sent.push(c); throw new Error("thread archived"); }), /archived/);
+  assert.equal(sent.length, 1);
+  // Another provider (Codex conversation, Claude wanted): not an account move, the refusal stands.
+  const codexQuery = fakeDb({ providerThreads: [{ instance: "codex", first: 4, last: 10, owner: null, active: 1 }], models });
+  await assert.rejects(sendMessage("t1", "x", { keepBusyProvider: true, query: codexQuery }, refuseMei), /background agents/);
+  // Already on that instance: nothing to keep.
+  assert.equal(busyProviderSelection("t1", { ...mei, instanceId: "claude_personal" }, query), null);
+  // T3's conversationProviderThread: a scheduled fresh-context run started the active (mei) provider
+  // thread, so a message continues the claude_personal conversation, and that is the one kept.
+  const scheduled = fakeDb({ providerThreads: [{ instance: "claudeAgent_mei", first: 11, last: 11, owner: null, active: 1 }, { instance: "claude_personal", first: 4, last: 10, owner: null, active: 0 }],
+    fresh: [{ ordinal: 11, status: "completed", started: "2026-11-23T17:00:00Z", scheduled: 1 }], models });
+  assert.equal(conversationInstance("t1", scheduled), "claude_personal");
+  assert.deepEqual(busyProviderSelection("t1", mei, scheduled), { ...mei, instanceId: "claude_personal" });
+  // An unscheduled fresh run is a context boundary: provider threads before it never continue.
+  const bounded = fakeDb({ providerThreads: [{ instance: "claudeAgent_mei", first: 12, last: 12, owner: null, active: 1 }, { instance: "claude_personal", first: 4, last: 10, owner: null, active: 0 }],
+    fresh: [{ ordinal: 11, status: "completed", started: "x", scheduled: 0 }, { ordinal: 12, status: "completed", started: "x", scheduled: 1 }], models });
+  assert.equal(conversationInstance("t1", bounded), "claudeAgent_mei");
 });
 
 test("interruptThread: run.interrupt on the live run; nothing when idle", async () => {
