@@ -10,7 +10,7 @@
 #                       auto = the one whose weekly limit resets soonest (usage.mjs --pick-codex)
 #   JOB=<name>          job directory name (default: <timestamp>-<model>)
 #   CWD=<dir>           working directory for the worker (default: git root of $PWD, else $PWD)
-#   TIMEOUT=<duration>  hard limit passed to timeout(1) (default: 45m)
+#   TIMEOUT=<duration>  hard limit passed to timeout(1); a bare number is minutes (default: 45m)
 #   KILL_AFTER=<dur>    SIGKILL this long after timeout's SIGTERM (default: 30s)
 #
 #   AGENT_JOBS_DIR=<dir> where job directories go (default: ~/.local/state/agent-jobs)
@@ -30,6 +30,9 @@ model=$1 prompt_src=$2
 
 # The worker runs in the caller's project, not in this skill's directory.
 cwd=${CWD:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}
+# A bare TIMEOUT number is minutes, as in t3-thread.mjs (timeout(1) alone would read seconds).
+[[ -n ${TIMEOUT:-} ]] && TIMEOUT=${TIMEOUT//[[:space:]]/}
+[[ ${TIMEOUT:-} =~ ^[0-9]+$ ]] && TIMEOUT=${TIMEOUT}m
 timeout_=${TIMEOUT:-45m}
 kill_after=${KILL_AFTER:-30s}
 

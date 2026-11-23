@@ -75,12 +75,15 @@ Codex on the account named by `codex.default`. **Auto-pick** is opt-in: with
 2. Reserve accounts (`"reserve": true`) come last, while under 95%.
 
 **When a run hits a limit:**
+- **Claude on the main account** (`t3-thread.mjs`) first reruns, same model, on
+  a fresh thread on the overflow account (`accounts.local.json`
+  `claude.overflow`, main instance -> second account's), when one is set.
 - **Codex (auto mode)** retries on the next account, up to three. A pinned
   `ACCOUNT` fails instead.
 - **Fable** falls back to Opus.
 - **AGY (gemini-flash)** reruns the same prompt on Haiku high.
-- **Opus** fails, because it has only one pool. Wait for the reset or pick
-  another model.
+- **Opus** past the overflow (or with none set) fails. Wait for the reset or
+  pick another model.
 
 **When a pool is out.** Both launchers read the cached AGY state
 (`~/.local/state/agent-stats/agy_state.json`, written by `code/agy-state.mjs` on
@@ -364,7 +367,8 @@ for features it lacks (ACCOUNT pools and auto fallback across accounts,
 as `run.sh`: `EFFORT`, `ACCOUNT`, `JOB`, `TIMEOUT`, `NO_SETTLE`. It opens a
 `[<model>] <job>` thread, waits for the turn to finish, and writes
 `~/.local/state/agent-jobs/<job>/{report.md,transcript.md,thread_id,exit_code}`.
-Then it settles the thread.
+A worker that writes its packet into `report.md` itself keeps it (its final
+reply is then only in `transcript.md`). Then it settles the thread.
 `TITLE="<fix>"` titles the thread after its fix (`[<model>] <fix>`, so workers stand apart from orchestrator threads): what the user gets, in their words, no plan or stage numbers (a leading "Plan 7 S1:" is dropped; `JOB` keeps the stage); the job dir still marks it a worker for the prune scripts.
 `node $S/t3-thread.mjs --rename "<title>"` renames the thread you run in (a lead retitling itself to the fixes it ships).
 `node $S/t3-thread.mjs --orchestrator "<title>" <brief-file> [--model opus] [--effort high]` starts a MAIN thread (orchestrator profile, not pinned, exact title, the brief as its first message) in this T3 project and prints its id at once. Triage threads use it to start one orchestrator per group of items.
@@ -405,7 +409,8 @@ JOB=stage-y-impl node $S/t3-thread.mjs opus /tmp/stage-y.md
   `node $S/t3-thread.mjs --compactions [threadId]` prints it (default: your own thread).
 - **Leads hand off too.** A lead at 3+ compactions makes its plan's Resume
   current, starts a fresh thread on the plan file and stops.
-- **`TIMEOUT` defaults to 45 min.** Raise it (`TIMEOUT=90m`) for long work. On a
+- **`TIMEOUT` defaults to 45 min.** Raise it (`TIMEOUT=90m`; a bare number is
+  minutes) for long work. On a
   timeout, `CONTINUE` and ask for the report from what the worker has.
 - **To wait for a job,** launch it as a background task and end the turn (or
   `t3_background_wait`); never a sleep/until loop on `exit_code`. When woken,

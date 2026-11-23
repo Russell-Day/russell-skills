@@ -113,7 +113,7 @@ globalThis.fakeT3Outcome = (thread, command, db) => {
   if ((instance && instance === process.env.FAKE_LIMIT_INSTANCE) || (sel.model && sel.model === process.env.FAKE_LIMIT_MODEL)) {
     if (process.env.FAKE_QUEUE_AFTER_LIMIT)
       db.runs.push({ run_id: "queued:" + thread.thread_id, thread_id: thread.thread_id, ordinal: 99, status: "queued", requested_at: new Date().toISOString(), completed_at: null });
-    return { error: { class: "usage_limit", message: "You've hit your usage limit." } };
+    return { error: { class: "usage_limit", message: process.env.FAKE_LIMIT_TEXT ?? "You've hit your usage limit." } };
   }
   if (process.env.FAKE_AGY === "quota" && instance === "antigravity")
     return { error: { class: "provider_error", message: "Individual quota reached. Please upgrade your subscription to increase your limits. Resets in 10h5m0s." } };
@@ -141,7 +141,7 @@ function agyHome({ state, threads = [], runs = [], items = [] } = {}) {
   fs.writeFileSync(path.join(home, "prompt.md"), "look something up");
   const env = { ...process.env, HOME: home, FAKE_T3: db, AGENT_JOBS_DIR: path.join(home, JOBS), PROJECT_ROOT: PROJECT, NO_SETTLE: "1",
     MESSAGE_BOARD_SCRIPT: path.join(home, "board-ok.py") };
-  for (const k of ["CLAUDE_CODE_SESSION_ID", "CODEX_SESSION_ID", "CODEX_THREAD_ID", "TITLE", "JOB", "ATTACH", "CONTINUE", "EFFORT", "FAKE_AGY", "ACCOUNT", "FAKE_PICKS", "FAKE_LIMIT_INSTANCE", "FAKE_LIMIT_MODEL", "FAKE_QUEUE_AFTER_LIMIT", "FAKE_SETTLE_REFUSE"]) delete env[k];
+  for (const k of ["CLAUDE_CODE_SESSION_ID", "CODEX_SESSION_ID", "CODEX_THREAD_ID", "TITLE", "JOB", "ATTACH", "CONTINUE", "EFFORT", "FAKE_AGY", "ACCOUNT", "FAKE_PICKS", "FAKE_LIMIT_INSTANCE", "FAKE_LIMIT_MODEL", "FAKE_LIMIT_TEXT", "FAKE_QUEUE_AFTER_LIMIT", "FAKE_SETTLE_REFUSE"]) delete env[k];
   const jobDir = (job) => path.join(home, JOBS, job);
   const read = (job, f) => { try { return fs.readFileSync(path.join(jobDir(job), f), "utf8"); } catch { return ""; } };
   return {
@@ -374,6 +374,96 @@ test("Fable re-poll: a usage-limited run behind a newer run cancelled before sta
   assert.deepEqual(f.sent("thread.create").map((c) => c.modelSelection.model), ["claude-opus-5-5"]);
   assert.deepEqual(f.sent("thread.settle").map((c) => c.threadId), [old]);
   assert.equal(f.read("fable", "report.md"), "fake reply");
+});
+
+// A worker the main Claude account's limit stops reruns, same model, on claude.overflow.
+function overflowAccounts(home) {
+  const raw = JSON.parse(fs.readFileSync(process.env.ACCOUNTS_FILE, "utf8"));
+  raw.claude.overflow = { [raw.claude.t3WorkerInstance]: "claudeAgent_spare_workers" };
+  const file = path.join(home, "accounts-overflow.json");
+  fs.writeFileSync(file, JSON.stringify(raw));
+  return { ACCOUNTS_FILE: file, main: raw.claude.t3WorkerInstance };
+}
+test("Claude overflow: Opus at the main account's limit reruns on the overflow account, same model, fresh thread", () => {
+  const f = agyHome();
+  const { ACCOUNTS_FILE, main } = overflowAccounts(f.home);
+  const r = ok(f.run("ovf", { ACCOUNTS_FILE, FAKE_LIMIT_INSTANCE: main }, "opus"));
+  assert.match(r.stderr, new RegExp(`Claude overflow: ${main} -> claudeAgent_spare_workers`));
+  const created = f.sent("thread.create");
+  assert.deepEqual(created.map((c) => [c.modelSelection.instanceId, c.modelSelection.model]),
+    [[main, "claude-opus-5-5"], ["claudeAgent_spare_workers", "claude-opus-5-5"]]);
+  assert.deepEqual(f.attempts("ovf").map((a) => a.exit), [1, 0]);
+  assert.deepEqual(f.sent("thread.settle").map((c) => c.threadId), [created[0].threadId]);
+  // Without an overflow entry the limited run is the result, as before.
+  const g = agyHome();
+  assert.equal(g.run("no-ovf", { FAKE_LIMIT_INSTANCE: main }, "opus").status, 1);
+  assert.equal(g.sent("thread.create").length, 1);
+});
+
+test("Claude overflow: Fable moves first, and its Opus fallback stays on the overflow account", () => {
+  const f = agyHome();
+  const { ACCOUNTS_FILE, main } = overflowAccounts(f.home);
+  ok(f.run("fable-ovf", { ACCOUNTS_FILE, FAKE_LIMIT_MODEL: "claude-fable-5-2" }, "fable"));
+  assert.deepEqual(f.sent("thread.create").map((c) => [c.modelSelection.instanceId, c.modelSelection.model]),
+    [[main, "claude-fable-5-2"], ["claudeAgent_spare_workers", "claude-fable-5-2"], ["claudeAgent_spare_workers", "claude-opus-5-5"]]);
+});
+
+// A preload that writes `text` into the job's report.md once the first thread exists (a worker
+// writing its packet itself), then a launch of `model` with it.
+function runWithWriter(f, job, text, model, extra = {}) {
+  const d = path.join(f.home, JOBS, job);
+  fs.mkdirSync(d, { recursive: true });
+  const writer = path.join(f.home, `writer-${job}.mjs`);
+  fs.writeFileSync(writer, `import fs from "node:fs";\nconst t = setInterval(() => { try { const j = JSON.parse(fs.readFileSync(process.env.FAKE_T3, "utf8")); if (j.commands.some((c) => c.type === "thread.create")) { fs.writeFileSync(${JSON.stringify(path.join(d, "report.md"))}, ${JSON.stringify(text)}); clearInterval(t); } } catch {} }, 50);\nt.unref();\n`);
+  return spawnSync(process.execPath, ["--import", fakeT3, "--import", path.join(f.home, "agy-preload.mjs"), "--import", writer, script, model, path.join(f.home, "prompt.md")],
+    { env: { ...process.env, HOME: f.home, FAKE_T3: path.join(f.home, "t3.json"), AGENT_JOBS_DIR: path.join(f.home, JOBS), PROJECT_ROOT: PROJECT, NO_SETTLE: "1", JOB: job,
+      MESSAGE_BOARD_SCRIPT: path.join(f.home, "board-ok.py"), ...extra }, encoding: "utf8", timeout: 60000 });
+}
+test("report.md the worker wrote during its run is kept; its reply stays in transcript.md", () => {
+  const f = agyHome();
+  fs.mkdirSync(path.join(f.home, JOBS, "self"), { recursive: true });
+  fs.writeFileSync(path.join(f.home, JOBS, "self", "report.md"), "old round");
+  ok(runWithWriter(f, "self", "worker packet", "haiku"));
+  assert.equal(f.read("self", "report.md"), "worker packet");
+  assert.equal(f.read("self", "transcript.md"), "fake reply");
+  // A later run whose worker leaves report.md alone writes its reply there as usual.
+  ok(f.run("self", {}, "haiku"));
+  assert.equal(f.read("self", "report.md"), "fake reply");
+});
+
+test("report.md: a worker's packet survives a limit retry; one identical to the old report is still the worker's", () => {
+  const f = agyHome();
+  const { ACCOUNTS_FILE, main } = overflowAccounts(f.home);
+  ok(runWithWriter(f, "retry-pkt", "worker packet", "opus", { ACCOUNTS_FILE, FAKE_LIMIT_INSTANCE: main }));
+  assert.equal(f.sent("thread.create").length, 2);
+  assert.equal(f.read("retry-pkt", "report.md"), "worker packet");
+  const g = agyHome();
+  const file = path.join(g.home, JOBS, "same", "report.md");
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, "same packet");
+  fs.utimesSync(file, new Date(Date.now() - 60000), new Date(Date.now() - 60000));
+  ok(runWithWriter(g, "same", "same packet", "haiku"));
+  assert.equal(g.read("same", "report.md"), "same packet");
+});
+
+test("Claude overflow: Fable at the 5-hour limit on the overflow account stops; no Opus thread", () => {
+  const f = agyHome();
+  const { ACCOUNTS_FILE } = overflowAccounts(f.home);
+  const r = f.run("fable-5h", { ACCOUNTS_FILE, FAKE_LIMIT_MODEL: "claude-fable-5-2", FAKE_LIMIT_TEXT: "You've hit your 5-hour limit." }, "fable");
+  assert.equal(r.status, 1, r.stderr);
+  assert.match(r.stderr, /Claude 5-hour limit: Opus shares it/);
+  assert.deepEqual(f.sent("thread.create").map((c) => c.modelSelection.model), ["claude-fable-5-2", "claude-fable-5-2"]);
+});
+
+test("TIMEOUT: a bare number is minutes, 90s and 2h as written, a bad value says how to write it", () => {
+  const f = agyHome();
+  for (const [value, line] of [["180", "timeout 180 min"], ["90s", "timeout 1.5 min"], ["2h", "timeout 120 min"]]) {
+    ok(f.run(`t-${value}`, { TIMEOUT: value }, "haiku"));
+    assert.ok(f.read(`t-${value}`, "run.log").includes(line), `${value}: ${f.read(`t-${value}`, "run.log")}`);
+  }
+  const r = f.run("t-bad", { TIMEOUT: "ten" }, "haiku");
+  assert.notEqual(r.status, 0);
+  assert.match(r.stderr, /bad TIMEOUT: ten \(use 90m, 2h or 30s\)/);
 });
 
 // Handoff: CONTINUE on a thread compacted HANDOFF_COMPACTIONS (3) times or

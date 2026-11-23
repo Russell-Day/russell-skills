@@ -173,10 +173,11 @@ function selection(label) {
   }
 }
 
+// A bare number is minutes (TIMEOUT=180 once meant 180 s and cut a worker off at 3 min); 90s / 90m / 2h as written.
 function parseDuration(s) {
-  const m = /^(\d+)([smh]?)$/.exec(s);
-  if (!m) throw new Error(`bad TIMEOUT: ${s}`);
-  return Number(m[1]) * { "": 1, s: 1, m: 60, h: 3600 }[m[2]] * 1000;
+  const m = /^(\d+)([smh]?)$/.exec(s.trim());
+  if (!m) throw new Error(`bad TIMEOUT: ${s} (use 90m, 2h or 30s)`);
+  return Number(m[1]) * { "": 60, s: 1, m: 60, h: 3600 }[m[2]] * 1000;
 }
 
 let modelSelection = selection(model);
@@ -188,6 +189,7 @@ fs.copyFileSync(promptSrc, path.join(job, "prompt.md"));
 fs.appendFileSync(path.join(job, "prompt.md"), "\n\n" + fs.readFileSync(path.join(here, "worker-communication.md"), "utf8"));
 const prompt = fs.readFileSync(path.join(job, "prompt.md"), "utf8");
 const log = (...a) => fs.appendFileSync(path.join(job, "run.log"), `${new Date().toISOString()} ${a.join(" ")}\n`);
+log(`timeout ${timeoutMs / 60000} min (TIMEOUT=${process.env.TIMEOUT ?? "unset"})`);
 // Review budget (orchestrate §9): every launch of a review job that sends a turn is a round,
 // counted in the job dir's `rounds`. A review job is one by its brief ("REVIEW ONLY." /
 // "RECHECK ONLY."), its JOB name (`-review`, `-recheck`, `-final`) or an earlier counted round,
@@ -309,11 +311,27 @@ function recordThread(threadId) {
 
 // The latest run's assistant replies -> report.md and transcript.md.
 // keep=true leaves the files alone when the run has no reply.
+// A worker that wrote report.md itself (its mtime or text changed since this script last saw it)
+// keeps it, through every later save of this launch (a limit retry, a fallback): the replies stay in
+// transcript.md only.
+const readOr = (file) => { try { return fs.readFileSync(file, "utf8"); } catch { return ""; } };
+const mtimeOf = (file) => { try { return fs.statSync(file).mtimeMs; } catch { return null; } };
+let reportSeen = readOr(path.join(job, "report.md")), reportMtime = mtimeOf(path.join(job, "report.md")), workerReport = false;
 function saveReport(thread, keep = false) {
   const replies = thread?.latestRunId ? runReplies(thread.id, thread.latestRunId) : [];
   if (keep && !replies.length) return;
   fs.writeFileSync(path.join(job, "transcript.md"), replies.join("\n\n---\n\n"));
-  fs.writeFileSync(path.join(job, "report.md"), replies.at(-1) ?? (thread?.lastError ?? ""));
+  const file = path.join(job, "report.md");
+  const old = readOr(file);
+  if (old.trim() && (workerReport || old !== reportSeen || mtimeOf(file) !== reportMtime)) {
+    reportSeen = old; reportMtime = mtimeOf(file);
+    if (!workerReport) log("report.md written by the worker this run: kept; its replies are in transcript.md");
+    workerReport = true;
+    return;
+  }
+  reportSeen = replies.at(-1) ?? (thread?.lastError ?? "");
+  fs.writeFileSync(file, reportSeen);
+  reportMtime = mtimeOf(file);
 }
 
 // Poll a thread (getThread, a DB read) until its run ends or the deadline passes. After a
@@ -458,7 +476,8 @@ async function runThread(attempt) {
   return { threadId, thread, rc };
 }
 
-// Limit go-around: Codex opens a new thread on the next account (auto mode only),
+// Limit go-around: a Claude worker on the main account moves to its overflow account
+// (claude.overflow) with the same model; Codex opens a new thread on the next account (auto mode only),
 // Fable falls back to Opus (separate weekly bucket), an AGY quota error reruns
 // the prompt on Haiku high. The limited thread is abandoned (settled) before the retry starts
 // the prompt over.
@@ -475,13 +494,31 @@ for (let attempt = 1; attempt <= 3; attempt++) {
   const who = isCodex ? codexName : modelSelection.model;
   log("limit reached on", who);
   console.error(`limit reached on ${who} (attempt ${attempt})`);
-  if (isCodex && autoAccount) {
+  const overflowTo = claudeAccount.overflow[modelSelection.instanceId];
+  if (overflowTo) {
+    // The main Claude account's limit: the same model reruns on the overflow account, before any
+    // model fallback (its windows are its own).
+    const line = `Claude overflow: ${modelSelection.instanceId} -> ${overflowTo}`;
+    console.error(line); log(line); fs.appendFileSync(path.join(job, "limits.log"), `${line}\n`);
+    modelSelection = { ...modelSelection, instanceId: overflowTo };
+  } else if (isCodex && autoAccount) {
     tried.push(codexName);
     try { modelSelection = selection(model); } catch (e) { console.error(e.message); break; }
   } else if (modelSelection.model?.startsWith("claude-fable-")) {
+    // Fable and Opus share the Claude 5-hour session: on that limit Opus would fail the same way.
+    // Only Fable's own weekly bucket falls to Opus.
+    if (/5-hour|five_hour/i.test(errorText)) {
+      const line = "Claude 5-hour limit: Opus shares it, so no Opus fallback; rerun this job after the reset";
+      console.error(line); log(line); fs.appendFileSync(path.join(job, "limits.log"), `${line}\n`);
+      break;
+    }
+    // A thread on an overflow instance (moved, re-polled or started there) keeps that account.
+    const onOverflow = Object.values(claudeAccount.overflow).includes(modelSelection.instanceId);
     fallbackFrom = label;
     label = "opus";
     modelSelection = selection("opus");
+    const to = onOverflow && claudeAccount.overflow[modelSelection.instanceId];
+    if (to) modelSelection = { ...modelSelection, instanceId: to };
     console.error("falling back to claude-opus-5-5");
   } else if (modelSelection.instanceId === "antigravity") {
     // AGY quota: record the reset so the next jobs skip Gemini, then rerun on Haiku now.
