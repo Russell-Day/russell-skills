@@ -48,7 +48,9 @@ is settled, archived, snoozed, or a `thread:delegated-task:…` child whose task
 ended, with no live or queued run and 5 min without activity, gets T3's
 `provider-session.detach`. The process exits; the thread keeps its native
 session, so its next message resumes it (`claude --resume`) with its whole
-conversation. Open threads keep T3's 30 min. A session whose Claude transcript
+conversation. An open main thread goes too once nothing has happened in it for
+20 min (`--open-idle-min N`; state `idle-open`), with no running worker of its
+own; open delegated children are left to T3. A session whose Claude transcript
 shows a background Bash command or Monitor with no completion notice yet is
 kept (`kept … background work pending` in the log), since only its live process
 can deliver that notice and wake the agent. Codex threads are reaped the same
@@ -59,4 +61,4 @@ activity, and kept while its rollout shows an open turn, tool call or spawned
 agent. Each detach, keep or failure is a line
 in `~/.local/state/agent-stats/reap-sessions.log`, and a failure fails the
 unit. `--dry-run` lists, `--json` prints the result, `--idle-min N` changes the
-wait.
+wait for finished threads.

@@ -98,8 +98,53 @@ test("reapable: idle minutes against --idle-min; a passed snooze is open; a chil
   assert.deepEqual(reapable([session("q", { settled: true, liveRuns: 1 })], { now: NOW }), []);
 });
 
+test("reapable on the real SQL with --open-idle-min: open main threads idle that long go too, never a child, a busy or a deleted one", () => {
+  const picked = reapable(liveSessions({}, v2(tables())), { now: NOW, idleMin: 5, openIdleMin: 20 });
+  assert.deepEqual(Object.fromEntries(picked.map((s) => [s.threadId, s.state])),
+    { settled: "settled", archived: "archived", snoozed: "snoozed", [child("done")]: "task-ended", "settled-held": "settled", open: "idle-open", woke: "idle-open" });
+  assert.deepEqual(reapable(liveSessions({}, v2(tables())), { now: NOW, idleMin: 5, openIdleMin: 31 }).filter((s) => s.state === "idle-open"), []);
+});
+
+test("reapable: an open main thread waits --open-idle-min (default never); a child, a live run or a running worker of its own keeps it", () => {
+  const open = (id, edits = {}) => session(id, { lastActivityAt: min(20), ...edits });
+  assert.deepEqual(reapable([open("a")], { now: NOW }), [], "the library default leaves open threads to T3");
+  assert.deepEqual(reapable([open("a"), open("b", { lastActivityAt: min(19) })], { now: NOW, openIdleMin: 20 }).map((x) => [x.threadId, x.state, x.idleMin]), [["a", "idle-open", 20]]);
+  assert.deepEqual(reapable([open(child("w"), { child: true, tasksRunning: 0 })], { now: NOW, openIdleMin: 20 }).map((x) => x.state), ["task-ended"]);
+  assert.deepEqual(reapable([open(child("x"), { child: true, tasksRunning: 1 })], { now: NOW, openIdleMin: 0 }), []);
+  assert.deepEqual(reapable([open("r", { liveRuns: 1 }), open("l", { childrenRunning: 1 }), open("d", { deleted: true })], { now: NOW, openIdleMin: 0 }), []);
+});
+
+test("reap-sessions.mjs: a bad --open-idle-min fails loudly", () => {
+  const bad = (() => { try { execFileSync(process.execPath, [path.join(here, "reap-sessions.mjs"), "--open-idle-min", "soon", "--dry-run"], { encoding: "utf8", stdio: "pipe" }); return null; } catch (e) { return e; } })();
+  assert.ok(bad && bad.status !== 0 && /--open-idle-min/.test(bad.stderr));
+});
+
 const tmpLog = () => path.join(fs.mkdtempSync(path.join(os.tmpdir(), "reap-")), "reap-sessions.log");
+
+test("reap: an idle open thread whose background work can't be checked is kept; a finished one is detached as before", async () => {
+  const sent = [], out = [];
+  const r = await reap({ now: () => NOW, openIdleMin: 20, query: v2(tables()), send: async (c) => sent.push(c), log: tmpLog(), out: (l) => out.push(l),
+    background: () => ({ error: "no transcript" }) });
+  assert.ok(!sent.some((c) => c.threadId === "open" || c.threadId === "woke"), "open threads stay");
+  assert.deepEqual(r.kept.map((k) => [k.threadId, k.state]).sort(), [["open", "idle-open"], ["woke", "idle-open"]]);
+  assert.ok(sent.some((c) => c.threadId === "settled"), "finished threads still go");
+  assert.ok(out.some((l) => /kept open .*unchecked - "no transcript"/.test(l)));
+});
 const none = () => ({ pending: [] }); // no background work anywhere
+
+test("reap: background work is read again right before each detach; an open thread that turned unreadable, or any that started work, is skipped", async () => {
+  const sent = [], out = [], reads = new Map();
+  // First read: nothing pending. Second read (right before the detach): "open" can't be read,
+  // "settled" started a background run, "archived" can't be read (a finished thread still goes).
+  const second = { open: { error: "no transcript" }, settled: { pending: [{ id: "b1", tool: "Bash", what: "pytest", startedAt: min(1) }] }, archived: { error: "no transcript" } };
+  const background = (s) => { const n = (reads.get(s.threadId) ?? 0) + 1; reads.set(s.threadId, n); return n > 1 && second[s.threadId] ? second[s.threadId] : { pending: [] }; };
+  await reap({ now: () => NOW, openIdleMin: 20, query: v2(tables()), send: async (c) => sent.push(c), log: tmpLog(), out: (l) => out.push(l), background });
+  const ids = sent.map((c) => c.threadId);
+  assert.ok(!ids.includes("open") && !ids.includes("settled"), ids.join(","));
+  assert.ok(ids.includes("woke") && ids.includes("archived"), ids.join(","));
+  assert.ok(out.some((l) => /^skipped open .*background work not checked: no transcript/.test(l)), out.join("\n"));
+  assert.ok(out.some((l) => /^skipped settled .*background work pending/.test(l)), out.join("\n"));
+});
 
 test("reap: sends provider-session.detach for each finished session and logs one line each", async () => {
   const sent = [], log = tmpLog();

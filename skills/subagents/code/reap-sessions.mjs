@@ -5,13 +5,16 @@
 // `codex app-server`) for all its threads: detaching one thread from it only unloads that thread
 // (app-server thread/unsubscribe); the shared process keeps running.
 //
-//   node reap-sessions.mjs [--idle-min 5] [--dry-run] [--json]
+//   node reap-sessions.mjs [--idle-min 5] [--open-idle-min 20] [--dry-run] [--json]
 //
 // A live session (ready and bound, see liveSessions in t3-api.mjs) is detached when its thread
 // is finished: settled, archived, snoozed, or a delegate_task child whose task is no longer
 // running. It must also have no live run (preparing, starting, running, waiting, or queued and
 // not held), no delegate_task child of its own still running, and nothing in it for --idle-min
-// minutes. Open threads keep T3's default. The thread
+// minutes. An open main thread (not a delegate_task child) is detached too once nothing has
+// happened in it for --open-idle-min minutes (idle open threads can hold GBs of Claude processes
+// while other work waits for memory; this frees the process and leaves the thread as it is),
+// under the same live-run, child and background-work checks. The thread
 // keeps its native session, so a later message resumes it with its whole conversation.
 // A session whose Claude transcript shows a background Bash command or Monitor still running is
 // kept: its completion notice wakes the agent, and only the live `claude` process can deliver it
@@ -42,12 +45,15 @@ export function finishedState(s, now = Date.now()) {
 }
 
 // The sessions to detach, each with `state` and `idleMin` (whole minutes since its last activity).
-export function reapable(sessions, { now = Date.now(), idleMin = 5 } = {}) {
+// A finished thread goes after `idleMin`; an open main thread ("idle-open") after `openIdleMin`
+// (Infinity: never, the library default; the CLI's is 20).
+export function reapable(sessions, { now = Date.now(), idleMin = 5, openIdleMin = Infinity } = {}) {
   return sessions.flatMap((s) => {
-    const state = finishedState(s, now);
-    if (!state || s.liveRuns > 0 || s.tasksRunning > 0 || s.childrenRunning > 0 || !s.lastActivityAt) return [];
+    if (s.deleted || s.liveRuns > 0 || s.tasksRunning > 0 || s.childrenRunning > 0 || !s.lastActivityAt) return [];
     const idle = Math.floor((now - Date.parse(s.lastActivityAt)) / 60000);
-    return idle >= idleMin ? [{ ...s, state, idleMin: idle }] : [];
+    const state = finishedState(s, now);
+    if (state) return idle >= idleMin ? [{ ...s, state, idleMin: idle }] : [];
+    return !s.child && idle >= openIdleMin ? [{ ...s, state: "idle-open", idleMin: idle }] : [];
   });
 }
 
@@ -202,21 +208,24 @@ const line = (s) => `${s.threadId} "${s.title ?? ""}" state=${s.state} idle=${s.
 // a message meanwhile, or whose session changed, is left alone. `background(s)` reads a session's
 // pending background work (sessionBackground for Claude, codexBackground for Codex): pending work
 // keeps the session, and a session whose transcript or rollout can't be read is detached as
-// before, its line saying so. Other providers' sessions are left to T3.
-export async function reap({ idleMin = 5, dryRun = false, now = () => Date.now(), query = t3Query, send, connect, log = logFile, out = console.log,
+// before, its line saying so (an open thread's is kept instead). Other providers' sessions are left to T3.
+export async function reap({ idleMin = 5, openIdleMin = Infinity, dryRun = false, now = () => Date.now(), query = t3Query, send, connect, log = logFile, out = console.log,
   background = (s) => (s.driver === "codex" ? codexBackground(s) : sessionBackground(s, { now: now() })) } = {}) {
-  const pick = () => reapable(liveSessions({ driver: null }, query).filter((s) => reaped.includes(s.driver)), { now: now(), idleMin });
+  const pick = () => reapable(liveSessions({ driver: null }, query).filter((s) => reaped.includes(s.driver)), { now: now(), idleMin, openIdleMin });
   const write = (text) => { if (dryRun) return; fs.mkdirSync(path.dirname(log), { recursive: true }); fs.appendFileSync(log, `${new Date(now()).toISOString()} ${text}\n`); };
   const kept = [], unchecked = new Map();
   const candidates = pick().filter((s) => {
     const b = background(s);
+    // An open thread whose work can't be checked is kept: unlike a finished one, it may well be
+    // waiting on a notice only its live process can deliver.
+    if (b.error && s.state === "idle-open") { kept.push({ ...s, pending: [{ id: "-", tool: "unchecked", what: b.error, startedAt: "?" }] }); return false; }
     if (b.error) { unchecked.set(s.threadId, b.error); return true; }
     if (!b.pending.length) return true;
     kept.push({ ...s, pending: b.pending });
     return false;
   });
   const note = (s) => (unchecked.has(s.threadId) ? ` (background work not checked: ${unchecked.get(s.threadId)})` : "");
-  const result = { dryRun, idleMin,
+  const result = { dryRun, idleMin, openIdleMin,
     candidates: candidates.map((s) => ({ threadId: s.threadId, title: s.title, state: s.state, idleMin: s.idleMin, ...(unchecked.has(s.threadId) ? { backgroundNotChecked: unchecked.get(s.threadId) } : {}) })),
     kept: kept.map((s) => ({ threadId: s.threadId, title: s.title, state: s.state, idleMin: s.idleMin, pending: s.pending })), detached: [], errors: [] };
   // The log gets a kept line when a session is newly kept or its pending work changed, not every sweep.
@@ -250,6 +259,11 @@ export async function reap({ idleMin = 5, dryRun = false, now = () => Date.now()
   for (const [i, c] of candidates.entries()) {
     const s = pick().find((x) => x.threadId === c.threadId && x.providerSessionId === c.providerSessionId);
     if (!s) { out(`skipped ${line(c)}: busy or changed since the first read`); continue; }
+    // Background work is read again too: it may have started, or the transcript may have become
+    // unreadable, since the first read (an open thread with unreadable work is kept, as above).
+    const b = background(s);
+    if (b.error && s.state === "idle-open") { out(`skipped ${line(s)}: background work not checked: ${b.error}`); continue; }
+    if (!b.error && b.pending.length) { out(`skipped ${line(s)}: background work pending (${pendingText(b.pending)})`); continue; }
     try {
       await detachSession(s.threadId, s.providerSessionId, `reap-sessions: ${s.state}, idle ${s.idleMin} min`, send);
       write(`detached ${line(s)}${note(s)}`);
@@ -276,11 +290,13 @@ async function main() {
   const option = (name, fallback) => { const i = args.indexOf(name); return i < 0 ? fallback : args[i + 1]; };
   const idleMin = Number(option("--idle-min", "5"));
   if (!(idleMin >= 0)) throw new Error("--idle-min must be a number of minutes");
+  const openIdleMin = Number(option("--open-idle-min", "20"));
+  if (!(openIdleMin >= 0)) throw new Error("--open-idle-min must be a number of minutes");
   const json = args.includes("--json");
   let conn = null;
   const connect = async () => { conn = await t3Connect("reap sessions"); return (c) => conn.request("orchestration.dispatchCommand", c); };
   try {
-    const r = await reap({ idleMin, dryRun: args.includes("--dry-run"), connect, out: json ? () => {} : console.log });
+    const r = await reap({ idleMin, openIdleMin, dryRun: args.includes("--dry-run"), connect, out: json ? () => {} : console.log });
     if (json) console.log(JSON.stringify(r, null, 2));
     else console.log(r.dryRun ? `would detach ${r.candidates.length} session(s), keep ${r.kept.length}`
       : `detached ${r.detached.length} session(s), kept ${r.kept.length}, ${r.errors.length} error(s)`);
