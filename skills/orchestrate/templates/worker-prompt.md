@@ -19,6 +19,12 @@ yours; ignore them, never touch, stash, reset or checkout them.
 When done, run the brief's `helped` line: the post ids that
 helped you, or `--none`.
 
+## Review lessons from earlier stages
+<the plan's `## Review lessons` lines | none yet>
+Apply each one to your owned files before you report: these are findings that
+came back on earlier stages. In the packet, say which ones touched your files
+and what you changed.
+
 ## Input → expected output (write this first, then code to it)
 For every item, before changing code, write in your packet:
 ```

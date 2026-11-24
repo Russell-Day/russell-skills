@@ -6,6 +6,8 @@ Do your own searching, reading, test runs and probes. Do not start subagents, he
 Stage: <id/title>. Read <plan sections>.
 Scope: <exact files, incl. untracked>. Ignore other dirty WIP: <list>.
 Claims: <what the implementer says it did, with line refs>.
+Review lessons: <the plan's `## Review lessons` lines (orchestrate §9) | none>. Probe each one
+against this stage's files; a place the stage missed is a finding under that lesson's class.
 
 Adversarial probes (name the classes; most real REVISEs are one of these):
 1. Lifecycle races: <restart, concurrent run, cancel mid-write, duplicate delivery>.

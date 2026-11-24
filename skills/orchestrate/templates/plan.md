@@ -17,6 +17,10 @@ Skipped or deferred: `<id>` <why>.
 1. **Question:** … **Context:** … **What I found:** … **Recommendation:** …
    **Pros / cons:** … **Other options:** … — working guess until answered: <X>
 
+## Review lessons
+Filled on every REVISE (orchestrate §9); later stages' worker prompts and reviews carry it.
+- <class> (S<n> F<id>): <the fix pattern>; elsewhere: <places | none>
+
 ## Resume
 What a fresh thread on this plan reads first. Keep it current before you stop.
 - **Stages:** S1 committed <sha>; S2 review r1 (<thread>); S3 ended dropped: <why>; S4 planned.

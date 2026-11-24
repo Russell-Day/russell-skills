@@ -69,7 +69,8 @@ Quick wins first so the user sees movement; risky stages when quota is fresh.
 
 Write `planning/<plan>/plan.md` (fallback `docs/plans/<plan>.md`) from
 [templates/plan.md](templates/plan.md): stage table (items, model, status),
-the user's decisions, open questions, the commit rule, and a **Resume**
+the user's decisions, open questions, the commit rule, the **Review
+lessons** (§9), and a **Resume**
 section (stage status, decisions, next step, open risks). Keep the status
 column and Resume current: the lead, the user and a woken thread read them.
 
@@ -120,7 +121,8 @@ Pick the shape first (subagents, "Pick the shape"); stages the lead writes are
 reviewed and committed exactly like a worker's. For each worker stage: mark
 its items started (adapter), fill [templates/worker-prompt.md](templates/worker-prompt.md)
 into `/tmp/<plan>/<stage>.md` (it carries the worker rules: verbatim items and
-decisions, owned files and the other stages' WIP, input → expected output,
+decisions, owned files and the other stages' WIP, the plan's Review lessons
+so far, input → expected output,
 foreground tests, no stash or commit, no helpers, the packet and `VERDICT:`;
 add the project's hard rules), and launch it: T3's `delegate_task` by default
 (subagents "Dispatch": clientRequestId `<prefix><stage>-impl-r1`, fix rounds
@@ -177,7 +179,7 @@ Copy its `review-prompt.md`, fill the slots, and append
 [templates/review-addendum.md](templates/review-addendum.md) (the expectations
 check). Scope it exactly: base commit, the stage's files including untracked,
 the other stages' dirty files to ignore, the worker's claims with line refs,
-named adversarial probes, exact test commands.
+the plan's Review lessons, named adversarial probes, exact test commands.
 
 ```bash
 # launched like §5 (background task, then t3_background_wait)
@@ -224,6 +226,22 @@ split what's left. Then a targeted recheck on the **same reviewer thread**
 with the subagents `recheck-prompt.md` (`ATTACH=<review thread> CONTINUE=1`),
 naming only the open finding ids. When the fix changed code, the recheck
 reruns the stage's tests on the fixed copy, so its APPROVE covers the commit.
+
+**Forward each finding's class** (one finding once came back in five stage
+reviews of the same plan before the lead swept it). On every REVISE, copy each
+blocker or should whose `class:` isn't `one-off`, with the packet's
+`Elsewhere:` places, into the plan's `## Review lessons`, one line each:
+`<class> (S<n> F<id>): <the fix pattern>; elsewhere: <places | none>`. Then,
+before any later stage reaches review:
+- a stage not yet dispatched gets the section in its worker prompt;
+- a worker already running gets the new lines as one round (a project's
+  `--next-round`, else `t3_thread_send`) before its review is launched:
+  "apply these to your files, then report";
+- a stage the lead writes: the lead applies them before sending it for review;
+- the review prompt's `Review lessons:` slot carries the section, and the
+  reviewer probes each line against the stage.
+An `Elsewhere:` place no stage owns goes to the closest stage, or is filed
+with the adapter.
 
 **Budget** (adapted from t3dotgg's sol-loop): Codex rounds are the scarcest spend.
 - **3 review rounds per stage** (review + rechecks). Up to **5** only while a
