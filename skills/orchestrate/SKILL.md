@@ -60,7 +60,11 @@ worker prompts.
 ## 2. Stages
 
 Group items so that every stage owns a **disjoint set of files**, is one
-review and one commit's worth (1–5 small items, or one big one), keeps UI and
+review and one commit's worth (1–5 small items, or one big one), owns at most
+about 10 files not counting tests, fixtures, screenshots and docs (split a
+bigger one before dispatch: a 25-file stage's worker ran out of context and
+handed off with no tests written; write the count in the plan's Files owned
+cell), keeps UI and
 backend apart when the reviewer differs, and comes after any stage whose
 output it needs. Models per stage come from the subagents routing table.
 Quick wins first so the user sees movement; risky stages when quota is fresh.
@@ -219,10 +223,11 @@ ATTACH=$(cat ~/.local/state/agent-jobs/<prefix><stage>-impl/thread_id) CONTINUE=
   JOB=<prefix><stage>-impl node $S/t3-thread.mjs <model> /tmp/<plan>/<stage>-fix.md
 ```
 
-A worker past 3 compactions gets no new round: `CONTINUE=1` (or a project's
+A worker at 2+ compactions gets no new round: `CONTINUE=1` (or a project's
 `--next-round`) moves it to a fresh thread with the old id, last report, PLAN,
-brief and findings. A stage whose first turn compacts 3+ times was too big:
-split what's left. Then a targeted recheck on the **same reviewer thread**
+brief and findings (a fix round on a longer thread often ends before any edit);
+the successor does that round, not the stage again.
+A stage whose first turn compacts 3+ times was too big: split what's left. Then a targeted recheck on the **same reviewer thread**
 with the subagents `recheck-prompt.md` (`ATTACH=<review thread> CONTINUE=1`),
 naming only the open finding ids. When the fix changed code, the recheck
 reruns the stage's tests on the fixed copy, so its APPROVE covers the commit.

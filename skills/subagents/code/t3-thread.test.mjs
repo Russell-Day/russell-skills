@@ -466,8 +466,8 @@ test("TIMEOUT: a bare number is minutes, 90s and 2h as written, a bad value says
   assert.match(r.stderr, /bad TIMEOUT: ten \(use 90m, 2h or 30s\)/);
 });
 
-// Handoff: CONTINUE on a thread compacted HANDOFF_COMPACTIONS (3) times or
-// more opens a fresh thread instead. The old thread's compactions are pre-0.1.0 activity rows
+// Handoff: CONTINUE on a thread compacted HANDOFF_COMPACTIONS times or more (default 2 for a
+// worker, 3 for a reviewer) opens a fresh thread instead. The old thread's compactions are pre-0.1.0 activity rows
 // (and v2 compaction items); it has one finished run that replied "reply on <id>" (or, after
 // oldRunning(), a run still going). A third preload makes polls fast and answers each new run
 // with "reply on <thread id>"; with FAKE_QUOTA new Gemini threads hit the AGY quota; each
@@ -575,23 +575,38 @@ test("handoff: T3 refuses to settle the old thread, so no new thread starts; exi
   assert.equal(f.read("report.md"), `reply on ${longThread}`, "the old thread's last reply is kept as the report");
 });
 
-test("handoff: 2 compactions continue the same thread; the count is written", () => {
-  const f = handoffHome(threeCompactions.slice(0, 3));
+test("handoff: a worker under 2 compactions continues the same thread; the count is written", () => {
+  const f = handoffHome(threeCompactions.slice(0, 2));
   ok(f.run());
   assert.equal(f.sent("thread.create").length, 0);
   const starts = f.sent("message.dispatch");
   assert.deepEqual(starts.map((s) => s.threadId), [longThread]);
   assert.ok(starts[0].text.startsWith("fix finding 2"));
-  assert.equal(f.read("compactions"), "2\n");
+  assert.equal(f.read("compactions"), "1\n");
   assert.equal(f.read("thread_ids_prev"), "");
 });
 
-test("handoff: HANDOFF_COMPACTIONS=2 lowers the bar; no PLAN line without PLAN", () => {
+test("handoff: a worker's fix round at 2 compactions goes to a fresh thread; no PLAN line without PLAN", () => {
   const f = handoffHome(threeCompactions.slice(0, 3));
-  ok(f.run({ HANDOFF_COMPACTIONS: "2" }));
+  ok(f.run());
   const [s] = f.sent("message.dispatch");
   assert.notEqual(s.threadId, longThread);
   assert.ok(!s.text.includes("PLAN:"));
+  assert.ok(f.read("run.log").includes("(2 compactions)"));
+});
+
+test("handoff: an Opus review (RECHECK ONLY brief or a -review JOB) keeps a reviewer's 3", () => {
+  const f = handoffHome(threeCompactions.slice(0, 3));
+  fs.writeFileSync(f.prompt, "RECHECK ONLY. F1 again.\n");
+  ok(f.run());
+  assert.equal(f.sent("thread.create").length, 0, "the reviewer continues at 2 compactions");
+});
+
+test("handoff: HANDOFF_COMPACTIONS=3 keeps a twice-compacted worker on its thread", () => {
+  const f = handoffHome(threeCompactions.slice(0, 3));
+  ok(f.run({ HANDOFF_COMPACTIONS: "3" }));
+  assert.equal(f.sent("thread.create").length, 0);
+  assert.deepEqual(f.sent("message.dispatch").map((s) => s.threadId), [longThread]);
 });
 
 test("handoff: a still-running old turn blocks the takeover; nothing starts, the error is loud", () => {
@@ -644,12 +659,12 @@ test("--compactions: v2 compaction items and pre-0.1.0 activity rows both count"
   assert.equal(r.stdout.trim(), "3");
 });
 
-test("handoff: 2 old compactions + 1 since 0.1.0 reach the bar", () => {
-  const f = handoffHome(threeCompactions.slice(0, 3), ["2026-10-17T00:39:39Z"]);
+test("handoff: 1 old compaction + 1 since 0.1.0 reach a worker's bar", () => {
+  const f = handoffHome(threeCompactions.slice(0, 2), ["2026-10-17T00:39:39Z"]);
   ok(f.run());
   const [s] = f.sent("message.dispatch");
   assert.notEqual(s.threadId, longThread);
-  assert.ok(f.read("run.log").includes("(3 compactions)"));
+  assert.ok(f.read("run.log").includes("(2 compactions)"));
 });
 
 test("timeout: the running run is interrupted with run.interrupt; exit 124", () => {

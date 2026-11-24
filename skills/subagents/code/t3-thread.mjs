@@ -34,7 +34,8 @@
 // ATTACH=<threadId> re-polls a thread that is already running (say the wrapper
 // was killed) instead of starting a new one; pass the same JOB. With CONTINUE=1
 // the prompt file is sent as a follow-up turn on that thread, unless the thread
-// has been compacted HANDOFF_COMPACTIONS (default 3) times or more: then a new
+// has been compacted HANDOFF_COMPACTIONS times or more (default 2 for a worker: a fix round on a
+// twice-compacted worker often ends before any edit; 3 for a reviewer): then a new
 // thread (same model, effort, JOB and title) takes over, told the old thread's id,
 // the job's last report.md and PLAN (if set). It first waits for the old thread's
 // running turn to end and saves its reply as report.md; an EFFORT override applies to
@@ -398,7 +399,7 @@ async function runThread(attempt) {
       if (label === "gemini-flash") toHaiku(until);
       attach = undefined;
       snap = undefined;
-    } else if (n >= Number(process.env.HANDOFF_COMPACTIONS ?? 3)) {
+    } else if (n >= Number(process.env.HANDOFF_COMPACTIONS ?? (isReview || REVIEWERS.includes(labelFor(snap.modelSelection?.model) ?? model) ? 3 : 2))) {
       // A long thread hands off: a new thread on the same model and effort takes the job,
       // once the old thread's turn has ended and its reply is saved as the last report.
       if (snap.busy) {

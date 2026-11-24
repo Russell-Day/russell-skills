@@ -5,7 +5,7 @@ Source: <adapter: an issue tracker | <path>/TODO.md | …>. Items read <date>.
 
 | Stage | Items | Files owned | Live replay | Model | Reviewer | Status |
 |---|---|---|---|---|---|---|
-| S1 <title> | `<id>` <short>, `<id>` <short> | <dirs/files> | <snapshot, when the stage changes how the live app answers \| —> | opus med | <per Review cadence: terra61 high, or opus high → terra61 high> | planned / dispatched (<thread>) / review / fix r1 / APPROVE / committed <sha> / ended <no-work\|dropped\|blocked\|failed\|merged>: <why> |
+| S1 <title> | `<id>` <short>, `<id>` <short> | <dirs/files> (<N> files, ≤10 not counting tests/fixtures/screenshots/docs) | <snapshot, when the stage changes how the live app answers \| —> | opus med | <per Review cadence: terra61 high, or opus high → terra61 high> | planned / dispatched (<thread>) / review / fix r1 / APPROVE / committed <sha> / ended <no-work\|dropped\|blocked\|failed\|merged>: <why> |
 | S2 <title> | … | … | … | … | … | … |
 
 Skipped or deferred: `<id>` <why>.

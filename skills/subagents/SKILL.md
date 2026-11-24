@@ -363,7 +363,7 @@ the lead, so end the turn instead of polling. Per job:
 **Fallback: a visible T3 thread** through `code/t3-thread.mjs`, when
 `delegate_task` is unavailable (no T3 MCP in the session, a headless lead) or
 for features it lacks (ACCOUNT pools and auto fallback across accounts,
-`--orchestrator`, handoff at 3 compactions). The user can watch and steer it from the sidebar too. It takes the same labels and env
+`--orchestrator`, compaction hand-off). The user can watch and steer it from the sidebar too. It takes the same labels and env
 as `run.sh`: `EFFORT`, `ACCOUNT`, `JOB`, `TIMEOUT`, `NO_SETTLE`. It opens a
 `[<model>] <job>` thread, waits for the turn to finish, and writes
 `~/.local/state/agent-jobs/<job>/{report.md,transcript.md,thread_id,exit_code}`.
@@ -397,8 +397,10 @@ JOB=stage-y-impl node $S/t3-thread.mjs opus /tmp/stage-y.md
   file as a new turn on the same thread, keeping the thread's model and effort
   unless `EFFORT` is set. Use it for review → fix → recheck instead of fresh
   threads.
-- **Long threads hand off on their own.** On `CONTINUE=1`, a thread already
-  compacted 3 or more times (`HANDOFF_COMPACTIONS=N` to change) gets no new turn:
+- **Long threads hand off on their own.** On `CONTINUE=1`, a worker thread
+  already compacted 2 or more times, or a reviewer thread 3 or more
+  (`HANDOFF_COMPACTIONS=N` sets both; a fix round on a twice-compacted worker
+  often ends before any edit) gets no new turn:
   `t3-thread.mjs` waits for any running turn there to end (fails, starting
   nothing, if it outlasts `TIMEOUT`), saves its reply as `report.md`, then starts
   a fresh thread (same model, effort, `JOB` and title; `EFFORT` or `TITLE` set on
