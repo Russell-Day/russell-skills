@@ -70,6 +70,13 @@ const notRunning = (why) => Object.assign(new Error(`T3 not running (${why})`), 
 // the error carries `tokenRejected: true` and starts with TOKEN_REJECTED_TEXT, so the parent can
 // mint a fresh one and retry.
 export const TOKEN_REJECTED_TEXT = "T3 token rejected";
+// `t3 auth session issue --token-only` can print T3 log lines on stdout around the token
+// (chk7c94-review, 2026-11-23: one landed in the Bearer header and fetch threw "invalid header
+// value"). The token is the last non-empty line shaped like one (base64url parts joined by
+// dots, 32+ characters; a real one is hundreds); null when no line is.
+const TOKEN_SHAPE = /^[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)+=*$/;
+export const t3TokenFrom = (stdout) => String(stdout).split(/\r?\n/).map((l) => l.trim()).filter((l) => l.length >= 32 && TOKEN_SHAPE.test(l)).at(-1) ?? null;
+const badToken = (e) => /invalid header value/i.test(`${e.message} ${e.cause?.message ?? ""}`);
 export async function t3Connect(label = "agent skill") {
   let runtime;
   try { runtime = JSON.parse(fs.readFileSync(path.join(userdata, "server-runtime.json"), "utf8")); }
@@ -78,13 +85,27 @@ export async function t3Connect(label = "agent skill") {
   const budget = t3Timeouts().api, end = Date.now() + budget;
   const left = () => Math.max(1, end - Date.now());
   const envToken = process.env.T3_SESSION_TOKEN?.trim();
-  const token = envToken || runFor("connect (token)", budget, "t3", ["auth", "session", "issue", "--token-only", "--ttl", "5m", "--label", label], { encoding: "utf8" }).trim();
+  const mint = () => {
+    try { return t3TokenFrom(runFor("connect (token)", left(), "t3", ["auth", "session", "issue", "--token-only", "--ttl", "5m", "--label", label], { encoding: "utf8" })); }
+    catch (e) { if (e.timeout) throw slow("connect (token)", budget); throw e; }
+  };
+  // A minted token that comes out unusable (no token line, or one fetch refuses as a header)
+  // is minted once more; T3_SESSION_TOKEN is the caller's and is never retried here.
   let res;
-  try { res = await fetch(`${base}/api/auth/websocket-ticket`, { method: "POST", headers: { authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(left()) }); }
-  catch (e) {
-    if (e.name === "TimeoutError") throw slow("connect (ticket)", budget);
-    if (e.cause?.code === "ECONNREFUSED") throw notRunning(`connection refused on port ${runtime.port}`);
-    throw new Error(`T3 server not reachable on port ${runtime.port}: ${e.cause?.message ?? e.message}`);
+  for (let attempt = 1; ; attempt++) {
+    const token = envToken || mint();
+    if (!token && attempt === 1) continue;
+    if (!token) throw apiChanged("`t3 auth session issue --token-only` printed no token-shaped line twice");
+    try {
+      res = await fetch(`${base}/api/auth/websocket-ticket`, { method: "POST", headers: { authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(left()) });
+      break;
+    } catch (e) {
+      if (!envToken && attempt === 1 && badToken(e)) continue;
+      if (badToken(e)) throw new Error(`connect (ticket): the ${envToken ? "T3_SESSION_TOKEN" : "minted"} token is not a valid header value`);
+      if (e.name === "TimeoutError") throw slow("connect (ticket)", budget);
+      if (e.cause?.code === "ECONNREFUSED") throw notRunning(`connection refused on port ${runtime.port}`);
+      throw new Error(`T3 server not reachable on port ${runtime.port}: ${e.cause?.message ?? e.message}`);
+    }
   }
   if ((res.status === 401 || res.status === 403) && envToken) throw Object.assign(new Error(`${TOKEN_REJECTED_TEXT}: websocket ticket HTTP ${res.status} with T3_SESSION_TOKEN`), { tokenRejected: true });
   if (res.status === 401 || res.status === 403) throw apiChanged(`websocket ticket: HTTP ${res.status} (the server refused the \`t3 auth session issue\` token; is t3.real on the server's runtime?)`);

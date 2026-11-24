@@ -1,7 +1,8 @@
 // node --test skills/subagents/code/t3-api.test.mjs
 import "./testdata/use-test-accounts.mjs"; // first: fixed test accounts
 import assert from "node:assert/strict";
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFile, execFileSync, spawnSync } from "node:child_process";
+import http from "node:http";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -14,7 +15,7 @@ const JOBS_TMP = fs.mkdtempSync(path.join(os.tmpdir(), "t3-api-jobs-"));
 process.env.AGENT_JOBS_DIR = JOBS_TMP;
 const registryLines = () => { try { return fs.readFileSync(mainThreadsFile(), "utf8").trim().split("\n").filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
 const withoutAt = (lines) => lines.map(({ at, ...l }) => l);
-import { abandonThread, busyProviderSelection, conversationInstance, createMainThread, currentThread, mainThreadRoles, mainThreadsFile, recordMainThread, recordMissingMainThread, getThread, interruptThread, isWorker, jobThreadIds, mainModelSelection, orchestratorArgs, projectFor, renameThread, sendMessage, snoozeThread, workerThreadTitle } from "./t3-api.mjs";
+import { abandonThread, busyProviderSelection, conversationInstance, createMainThread, currentThread, mainThreadRoles, mainThreadsFile, recordMainThread, recordMissingMainThread, getThread, interruptThread, isWorker, jobThreadIds, mainModelSelection, orchestratorArgs, projectFor, renameThread, sendMessage, snoozeThread, t3TokenFrom, workerThreadTitle } from "./t3-api.mjs";
 
 test("TITLE worker: the title is the fix (with a model hint), never \"[model] job\"", () => {
   assert.equal(workerThreadTitle({ model: "opus", job: "p65-s3-impl", title: "Board lanes, priority tags" }), "[opus] Board lanes, priority tags");
@@ -405,4 +406,74 @@ console.log(JSON.stringify({ all: ids(), open: ids({ includeSettled: false }) })
   const got = JSON.parse(r.stdout);
   assert.deepEqual(got.all, ["open-a", "override-c*", "settled-b*", "unsettled-d"]);
   assert.deepEqual(got.open, got.all.filter((id) => !id.endsWith("*"))); // the SQL filter equals the JS rule
+});
+
+test("t3TokenFrom: the last non-empty token-shaped line; log lines and blanks around it never count", () => {
+  const tok = "eyJhbGciOiJIUzI1NiJ9_-x.c2lnbmF0dXJl";
+  assert.equal(t3TokenFrom(`${tok}\n`), tok);
+  assert.equal(t3TokenFrom(`timestamp=2026-11-23T23:10:00Z level=INFO fiber=#12 message="Migrations ran"\n${tok}\n\n`), tok);
+  assert.equal(t3TokenFrom(`  ${tok}  \r\n[t3] warn: runtime selected\n`), tok);
+  assert.equal(t3TokenFrom(`old.token1234-old.token1234-old-token\n${tok}`), tok);
+  assert.equal(t3TokenFrom(`${tok}\nlogentry.example\n`), tok); // too short to be a token
+  assert.equal(t3TokenFrom("short.tok\n"), null);
+  assert.equal(t3TokenFrom("level=INFO message=\"no token here\"\n\n"), null);
+  assert.equal(t3TokenFrom(""), null);
+});
+
+// t3Connect against a fake `t3` CLI (on PATH, its outputs in order from a script) and a local
+// ticket server that records the Authorization header and answers 500, so connect stops there.
+async function connectWithFakeCli(outputs, env = {}) {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "t3-api-token-"));
+  const bin = path.join(home, "bin");
+  fs.mkdirSync(bin);
+  fs.mkdirSync(path.join(home, ".t3/userdata"), { recursive: true });
+  outputs.forEach((o, i) => fs.writeFileSync(path.join(home, `out${i + 1}`), o));
+  fs.writeFileSync(path.join(bin, "t3"), `#!/bin/sh\n[ "$1" = --version ] && { echo "t3 v0.0-test"; exit 0; }\nn=$(( $(cat "${home}/calls" 2>/dev/null || echo 0) + 1 ))\necho $n > "${home}/calls"\ncat "${home}/out$n"\n`, { mode: 0o755 });
+  const headers = [];
+  const server = http.createServer((req, res) => { headers.push(req.headers.authorization); res.writeHead(500); res.end(); });
+  await new Promise((ok) => server.listen(0, "127.0.0.1", ok));
+  fs.writeFileSync(path.join(home, ".t3/userdata/server-runtime.json"), JSON.stringify({ port: server.address().port }));
+  const code = `import { t3Connect } from ${JSON.stringify(path.join(here, "t3-api.mjs"))};\ntry { await t3Connect("test"); console.log("connected"); } catch (e) { console.log(JSON.stringify({ message: e.message, tokenRejected: !!e.tokenRejected })); }`;
+  const { T3_SESSION_TOKEN, ...base } = process.env;
+  const stdout = await new Promise((ok, fail) => execFile(process.execPath, ["--input-type=module", "-e", code],
+    { env: { ...base, HOME: home, PATH: `${bin}:${process.env.PATH}`, ...env }, encoding: "utf8", timeout: 30000 }, (e, out, err) => (e ? fail(new Error(`${e.message}\n${err}`)) : ok(out))));
+  server.close();
+  const calls = Number(fs.readFileSync(path.join(home, "calls"), "utf8").trim() || 0);
+  return { result: JSON.parse(stdout), headers, calls };
+}
+
+test("t3Connect: a T3 log line on the token CLI's stdout never reaches the Bearer header", async () => {
+  const tok = "eyJhbGciOiJIUzI1NiJ9.c2lnbmF0dXJl";
+  const r = await connectWithFakeCli([`timestamp=2026-11-23T23:10:00Z level=INFO message="Using runtime 0.1.3"\n${tok}\n`]);
+  assert.deepEqual(r.headers, [`Bearer ${tok}`]);
+  assert.equal(r.calls, 1);
+  assert.match(r.result.message, /websocket ticket: HTTP 500/);
+});
+
+test("t3Connect: no token-shaped line mints once more; twice in a row is a loud error, never a bad header", async () => {
+  const tok = "eyJhbGciOiJIUzI1NiJ9.c2lnbmF0dXJl";
+  const again = await connectWithFakeCli(["level=WARN message=\"busy\"\n", `${tok}\n`]);
+  assert.equal(again.calls, 2);
+  assert.deepEqual(again.headers, [`Bearer ${tok}`]);
+  const twice = await connectWithFakeCli(["level=WARN a\n", "level=WARN b\n", `${tok}\n`]);
+  assert.equal(twice.calls, 2);
+  assert.deepEqual(twice.headers, []);
+  assert.match(twice.result.message, /T3 API changed .*printed no token-shaped line twice/);
+});
+
+test("t3Connect: T3_SESSION_TOKEN skips the CLI and keeps tokenRejected on 401", async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "t3-api-envtok-"));
+  fs.mkdirSync(path.join(home, ".t3/userdata"), { recursive: true });
+  const headers = [];
+  const server = http.createServer((req, res) => { headers.push(req.headers.authorization); res.writeHead(401); res.end(); });
+  await new Promise((ok) => server.listen(0, "127.0.0.1", ok));
+  fs.writeFileSync(path.join(home, ".t3/userdata/server-runtime.json"), JSON.stringify({ port: server.address().port }));
+  const code = `import { t3Connect } from ${JSON.stringify(path.join(here, "t3-api.mjs"))};\ntry { await t3Connect("test"); } catch (e) { console.log(JSON.stringify({ message: e.message, tokenRejected: !!e.tokenRejected })); }`;
+  const stdout = await new Promise((ok, fail) => execFile(process.execPath, ["--input-type=module", "-e", code],
+    { env: { ...process.env, HOME: home, PATH: "/nonexistent", T3_SESSION_TOKEN: " parent.token123 " }, encoding: "utf8", timeout: 30000 }, (e, out, err) => (e ? fail(new Error(`${e.message}\n${err}`)) : ok(out))));
+  server.close();
+  assert.deepEqual(headers, ["Bearer parent.token123"]);
+  const r = JSON.parse(stdout);
+  assert.equal(r.tokenRejected, true);
+  assert.match(r.message, /^T3 token rejected/);
 });

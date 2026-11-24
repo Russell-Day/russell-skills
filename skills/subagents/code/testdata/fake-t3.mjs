@@ -153,7 +153,7 @@ function apply(c) {
 
 child.execFileSync = function (cmd, args = [], opts) {
   const out = (v) => (opts?.encoding ? v : Buffer.from(v));
-  if (cmd === "t3") return out(args[0] === "--version" ? "t3 v0.1.0-fake\n" : "fake-token\n");
+  if (cmd === "t3") return out(args[0] === "--version" ? "t3 v0.1.0-fake\n" : "fake-token.0001-fake-token-0001-fake\n");
   if (cmd === "python3" && args[0] === "-c" && args.length >= 5) return out(JSON.stringify(query(args[3], JSON.parse(args[4]))));
   if (cmd === "python3" && args[0] === "-c" && args.length === 2) return out(JSON.stringify(read().projects.map((p) => [p.project_id, p.workspace_root]))); // old t3-thread.mjs project lookup
   if (args.some((a) => String(a).endsWith("/usage.mjs"))) return out(JSON.stringify(read().usage ?? []));
