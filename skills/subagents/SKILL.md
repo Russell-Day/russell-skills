@@ -430,8 +430,12 @@ JOB=stage-y-impl node $S/t3-thread.mjs opus /tmp/stage-y.md
   `t3_background_wait` (or blocks with `wait $!` / `tail --pid`) before ending
   its turn, never ending on "I'll be notified". The job itself survives the
   turn; the wake-up doesn't always. Put this in the prompt.
-- **A report that only says it is waiting on a job is not done.** No packet and
-  no `VERDICT:` line means: check the job's output yourself, then
+- **A report that only says it is waiting on a job is not done.** `t3-thread.mjs`
+  doesn't settle on it: a turn without the brief's `VERDICT:` line, or whose last
+  paragraph only says it waits on its own work ("tests are running in the
+  background", "when the replays finish, I'll…"), waits `VERDICT_WAIT_MIN`
+  (default 15) min for the job's wake-up turn, then asks once to finish. If the
+  report still has no packet or `VERDICT:` line: check the job's output yourself, then
   `t3_thread_send` the worker "continue: your job finished, finish the stage"
   (still running: "continue: wait for your job, then finish the stage";
   fallback `ATTACH=… CONTINUE=1`). Never sit on it.

@@ -522,6 +522,7 @@ function handoffHome(rows, items = []) {
     jobDir,
     jobs: path.join(home, JOBS),
     prompt: path.join(home, "prompt.md"),
+    preload,
     run: (extra = {}, args = ["opus", path.join(home, "prompt.md")]) => spawnSync(process.execPath, ["--import", fakeT3, "--import", preload, script, ...args],
       { env: { ...env, ...extra }, encoding: "utf8", timeout: 60000 }),
     sent: (type) => JSON.parse(fs.readFileSync(db, "utf8")).commands.filter((c) => !type || c.type === type),
@@ -684,7 +685,7 @@ function reviewerHome(rows = []) {
   const f = handoffHome(rows);
   f.oldThread({ title: "[sol62] Review S1", model_selection_json: sol62Sel });
   const readJob = (job, file) => { try { return fs.readFileSync(path.join(f.jobs, job, file), "utf8"); } catch { return ""; } };
-  const review = (job) => f.run({ JOB: job, TITLE: "Review S2", REPORT_FILE: path.join(f.jobs, job, "report.md") }, ["sol62", f.prompt]);
+  const review = (job, extra = {}) => f.run({ JOB: job, TITLE: "Review S2", REPORT_FILE: path.join(f.jobs, job, "report.md"), ...extra }, ["sol62", f.prompt]);
   return { ...f, readJob, review };
 }
 
@@ -716,6 +717,115 @@ test("new stage: an opus worker attached under a new JOB still continues its thr
   assert.equal(f.sent("thread.create").length, 0);
   assert.deepEqual(f.sent("message.dispatch").map((s) => s.threadId), [longThread]);
   assert.ok(!r.stderr.includes("new stage"), r.stderr);
+});
+
+// A review turn that ends without its VERDICT line is not the report (a reviewer stopped to wait on
+// a helper, was woken by it and approved; the job had already saved the no-verdict turn and exited).
+// The first turn ends "verdict follows"; FAKE_WAKE=self then has the helper wake the thread into a
+// turn of its own, FAKE_WAKE=none never does, so only the nudge brings the answer.
+const wakePreload = `
+const wakeFs = await import("node:fs");
+const prevWake = globalThis.fakeT3Outcome;
+let turns = 0;
+globalThis.fakeT3Outcome = (thread, command, db) => {
+  if (++turns > 1) return { reply: "nudged packet\\n\\nVERDICT: APPROVE" };
+  if (process.env.FAKE_WAKE === "self") setTimeout(() => {
+    const d = JSON.parse(wakeFs.readFileSync(process.env.FAKE_T3, "utf8"));
+    const ordinal = Math.max(...d.runs.filter((r) => r.thread_id === thread.thread_id).map((r) => r.ordinal)) + 1;
+    const run_id = "wake:" + ordinal, at = new Date().toISOString();
+    d.runs.push({ run_id, thread_id: thread.thread_id, ordinal, status: "completed", requested_at: at, completed_at: at });
+    d.messages.push({ thread_id: thread.thread_id, message_id: run_id + ":reply", run_id, role: "assistant", text: "woken packet\\n\\nVERDICT: APPROVE", created_at: at });
+    wakeFs.writeFileSync(process.env.FAKE_T3, JSON.stringify(d));
+  }, 2000);
+  return { ...prevWake(thread, command, db), reply: process.env.FAKE_FIRST ?? "Scratch tests still running; verdict follows." };
+};
+`;
+function wakeHome(brief = "RECHECK. End with VERDICT: APPROVE or VERDICT: REVISE.") {
+  const f = reviewerHome();
+  fs.appendFileSync(f.preload, wakePreload);
+  fs.writeFileSync(f.prompt, brief);
+  return f;
+}
+
+test("verdict: a reviewer woken by its helper after a no-verdict turn: that turn is the report, no nudge", () => {
+  const f = wakeHome();
+  const r = ok(f.review("p1", { FAKE_WAKE: "self", VERDICT_WAIT_MIN: "1" }));
+  assert.equal(f.read("report.md"), "woken packet\n\nVERDICT: APPROVE");
+  assert.equal(f.sent("message.dispatch").length, 1, "no nudge sent");
+  assert.ok(!r.stderr.includes("asked it to finish"), r.stderr);
+  assert.match(f.read("run.log"), /no verdict in/);
+});
+
+test("verdict: a reviewer that stays idle without a verdict is asked once, and its answer is the report", () => {
+  const f = wakeHome();
+  const r = ok(f.review("p1", { FAKE_WAKE: "none", VERDICT_WAIT_MIN: "0.1" }));
+  const sends = f.sent("message.dispatch");
+  assert.equal(sends.length, 2);
+  assert.match(sends[1].text, /^Your last turn ended without a verdict/);
+  assert.equal(sends[1].threadId, longThread);
+  assert.equal(f.read("report.md"), "nudged packet\n\nVERDICT: APPROVE");
+  assert.match(r.stderr, /reviewer ended a turn without a verdict: asked it to finish/);
+});
+
+// A worker that ends its turn only saying it waits (tests in the background, a restart-idle loop,
+// replays) has not answered; the job waits for its background job's wake-up instead of settling the
+// thread, which would stop the job.
+test("waiting: a worker (no verdict asked) ending on \"I'm waiting for …\" is woken by its job: that turn is the report", () => {
+  const f = wakeHome("Fix the follow-up text. Restart the server once idle, then report.");
+  const r = ok(f.review("p1", { FAKE_WAKE: "self", VERDICT_WAIT_MIN: "1", FAKE_FIRST: "Tests pass.\n\nI'm waiting for the backend to come back up and idle." }));
+  assert.equal(f.read("report.md"), "woken packet\n\nVERDICT: APPROVE");
+  assert.equal(f.sent("message.dispatch").length, 1, "no nudge sent");
+  assert.deepEqual(f.sent("thread.settle").map((c) => c.threadId), [longThread], "settled once, after the wake-up turn");
+  assert.match(f.read("run.log"), /waiting reply in/);
+  assert.ok(!r.stderr.includes("asked it to finish"), r.stderr);
+});
+
+test("waiting: a DONE/BLOCKED worker ending \"When the replays finish, I'll …\" that stays idle is asked once, in worker words", () => {
+  const f = wakeHome("Build S2. Last line `VERDICT: DONE` or `VERDICT: BLOCKED`.");
+  const r = ok(f.review("p1", { FAKE_WAKE: "none", VERDICT_WAIT_MIN: "0.1", FAKE_FIRST: "Ruff is clean.\n\nOnce the test runs are done I'll tally the hosts, then write the packet." }));
+  const sends = f.sent("message.dispatch");
+  assert.equal(sends.length, 2);
+  assert.match(sends[1].text, /^Your last turn ended on waiting/);
+  assert.match(sends[1].text, /VERDICT: DONE/);
+  assert.doesNotMatch(sends[1].text, /APPROVE/);
+  assert.equal(f.read("report.md"), "nudged packet\n\nVERDICT: APPROVE");
+  assert.match(r.stderr, /ended a turn on waiting reply: asked it to finish/);
+});
+
+test("waiting: \"Full suite is running in the background.\", \"Awaiting task completion.\" and an aside wait for the wake-up too", () => {
+  for (const last of ["Full suite is running in the background.", "Tests running in the background. I'll report when done.", "I'll report when the tests finish.", "Task launched. Awaiting task completion.", "Waiting on the idle loop (the user is busy; restart only once idle)."]) {
+    const f = wakeHome("Restart the server once idle and report.");
+    ok(f.review("p1", { FAKE_WAKE: "self", VERDICT_WAIT_MIN: "1", FAKE_FIRST: last }));
+    assert.equal(f.read("report.md"), "woken packet\n\nVERDICT: APPROVE", last);
+    assert.equal(f.sent("message.dispatch").length, 1, last);
+  }
+});
+
+test("waiting: a worker brief that only mentions APPROVE gets the worker nudge, not the review one", () => {
+  const f = wakeHome("Implement the APPROVE button on drafts, then report.");
+  ok(f.review("p1", { FAKE_WAKE: "none", VERDICT_WAIT_MIN: "0.1", FAKE_FIRST: "Now waiting for the Playwright run to finish." }));
+  const sends = f.sent("message.dispatch");
+  assert.equal(sends.length, 2);
+  assert.match(sends[1].text, /^Your last turn ended on waiting/);
+  assert.doesNotMatch(sends[1].text, /VERDICT/);
+});
+
+test("waiting: a brief that only mentions \"VERDICT:\" without a value asks for no verdict line", () => {
+  const f = wakeHome("Implement the VERDICT: label, then report.");
+  ok(f.review("p1", { FAKE_WAKE: "none", VERDICT_WAIT_MIN: "0.1", FAKE_FIRST: "Implemented the label." }));
+  assert.equal(f.sent("message.dispatch").length, 1);
+  assert.equal(f.read("report.md"), "Implemented the label.");
+});
+
+test("waiting: a finished worker report that merely mentions waiting on a person or decision is the report at once", () => {
+  for (const last of ["Changes are uncommitted, waiting for your review.", "Committed 3 files; the nightly sync keeps its own schedule.",
+    "Embeddings haven't been run and are still waiting on a separate GO.", "I'm waiting for your go.", "Ready to merge; awaiting Sam's decision on F2.",
+    "I'm waiting for Sam to pick a name.", "Changes complete. The queue is still running in the background.", "I'll report back once you confirm the copy.", "Optional: a \"queue still waiting\" banner when a reply arrives.", "Sidebar groups: Running, Waiting, Idle, Done."]) {
+    const f = wakeHome("Rename the setting and report what changed.");
+    ok(f.review("p1", { FAKE_WAKE: "none", VERDICT_WAIT_MIN: "0.1", OWNER_NAME: "Sam", FAKE_FIRST: `Renamed in 2 files.\n\n${last}` }));
+    assert.equal(f.sent("message.dispatch").length, 1, last);
+    assert.equal(f.read("report.md"), `Renamed in 2 files.\n\n${last}`);
+  }
 });
 
 // Review budget (orchestrate §9): each review launch that sends a turn is a round in the job dir's

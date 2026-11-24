@@ -338,8 +338,9 @@ function saveReport(thread, keep = false) {
 // Poll a thread (getThread, a DB read) until its run ends or the deadline passes. After a
 // message (`sent`), wait for a run newer than `priorRunId`: a new message can take a moment to
 // become a run. A re-poll of an idle thread with no run returns at once.
-async function waitTurn(threadId, { priorRunId = null, sent = false } = {}) {
-  const deadline = Date.now() + timeoutMs;
+async function waitTurn(threadId, { priorRunId = null, sent = false, startWithinMs = 0 } = {}) {
+  const started = Date.now();
+  const deadline = started + timeoutMs;
   let thread;
   for (;;) {
     await new Promise((r) => setTimeout(r, 5000));
@@ -347,6 +348,7 @@ async function waitTurn(threadId, { priorRunId = null, sent = false } = {}) {
     if (!thread) throw new Error(`thread ${threadId} is not in T3`);
     const ours = thread.latestRunId && (!sent || thread.latestRunId !== priorRunId);
     if (ours && !thread.busy) { log("run", thread.status); return { thread, rc: thread.status === "completed" ? 0 : 1 }; }
+    if (!ours && startWithinMs && Date.now() - started > startWithinMs) return { thread, noStart: true };
     if (!ours && !thread.busy && thread.lastError) { log("session error", thread.lastError); return { thread, rc: 1 }; }
     if (!sent && !thread.latestRunId && !thread.busy) return { thread, rc: 0 };
     if (Date.now() > deadline) return { thread, timedOut: true };
@@ -468,6 +470,7 @@ async function runThread(attempt) {
   console.error(`thread ${threadId} "${title}" — watch it in T3`);
 
   let { thread, rc = 0, timedOut } = await waitTurn(threadId, { priorRunId, sent });
+  if (!timedOut && rc === 0 && !answered(threadId, thread)) ({ thread, rc = 0, timedOut } = await awaitAnswer(threadId, thread));
   if (timedOut) {
     log("timeout; interrupting");
     await interruptThread(threadId, "timeout").catch((e) => log("interrupt", e.message));
@@ -475,6 +478,78 @@ async function runThread(attempt) {
     try { thread = getThread(threadId) ?? thread; } catch { /* keep the last read */ }
   }
   return { threadId, thread, rc };
+}
+
+// A reply that isn't the answer: a review or worker brief asks for a `VERDICT:` line and the turn
+// ended without one, or (any brief) the turn's last paragraph only says the thread waits on its own
+// pending work ("I'm waiting for the backend to come back", "When the replays finish, I'll count…").
+// Settling the thread then loses the background job's wake-up turn (a reviewer woken by its helper
+// approved after the job had saved its no-verdict turn; workers ended on "tests in the background"
+// and the settle killed the run). Wait VERDICT_WAIT_MIN (default 15) min for the thread's next turn,
+// which is what a thread woken by its own job does; if none starts, ask once to finish (review
+// wording for a review, worker wording otherwise). Up to 4 extra turns, then the last reply is the
+// report, said on stderr and in run.log.
+const VERDICT_RE = /^VERDICT:\s*(APPROVE|REVISE|DONE|BLOCKED)\b/m;
+const VERDICT_NUDGE = "Your last turn ended without a verdict. Finish the review now: read the results of anything you started (or run the checks yourself in the foreground), then send the full packet ending in \"VERDICT: APPROVE\" or \"VERDICT: REVISE\". Don't end the turn waiting.";
+// A sentence that says the thread itself waits on its own pending work; one that waits on a person or
+// a decision ("waiting for your review", "still waiting on a separate GO") is a finished report.
+// "Running in the background" counts for the thread's own work (tests, a job, a run), not a service
+// it reports on ("the queue is still running in the background").
+const WAITING_RE = /\b(?:(?:I'm|I am|now|still|currently) (?:waiting|awaiting)|I'll wait|(?:tests?|suites?|checks?|jobs?|runs?|builds?|replays?|bench(?:es)?|pytest|playwright|task|it|they)(?: (?:is|are|still|now))* running in the background|I'll (?:report|reply|follow up|post|send|write|summari[sz]e|update|finish|continue)\b[^.\n]{0,60}?\b(?:when|once|after|as soon as)\b|wait(?:ing)? for (?:the )?background|(?:when|once|after) [^.\n]{1,80}? (?:finish(?:es)?|complete[sd]?|(?:is|are) done|comes? back|lands?)\b[^.\n]{0,40}\bI'll)\b|(?:^|[;,:–—]\s*)(?:waiting|awaiting)\b(?!\s*,)/i;
+// People a report may wait on: the reader, the lead, the user, and the user's first name (from
+// OWNER_NAME, else git's user.name), so "awaiting <name>'s decision" is a finished report.
+let notOursRe;
+function notOurs(text) {
+  if (!notOursRe) {
+    let owner = process.env.OWNER_NAME;
+    if (owner === undefined) try { owner = execFileSync("git", ["config", "user.name"], { stdio: ["ignore", "pipe", "ignore"] }).toString().trim().split(/[\s_-]+/)[0]; } catch { owner = ""; }
+    const name = owner ? `|${owner.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}` : "";
+    notOursRe = new RegExp(`\\b(?:you|your|the user${name}|the lead|review(?:er)?|approval|go-ahead|decision|sign-off|confirmation)\\b|\\b(?:a|your|his|her|their|the|separate${name ? `|${name.slice(1)}'s` : ""}) go\\b`, "i");
+  }
+  return notOursRe.test(text);
+}
+// A brief that asks for a verdict line names its values; "the VERDICT: label" in a task is not one.
+const asksVerdict = /VERDICT:\s*(?:APPROVE|REVISE|DONE|BLOCKED)\b/.test(prompt);
+const reviewsVerdict = () => isReview || /VERDICT:\s*(APPROVE|REVISE)\b/.test(prompt);
+const lastReplyOf = (threadId, t) => (t?.latestRunId ? runReplies(threadId, t.latestRunId).at(-1) ?? "" : "").trim();
+const waitingOnly = (text) => !VERDICT_RE.test(text)
+  // Quoted and code spans are product text the report talks about ("a \"hold still waiting\" note"), not its own state.
+  && (text.split(/\n\s*\n/).at(-1) ?? "").replace(/"[^"\n]*"|“[^”\n]*”|`[^`\n]*`/g, "…").split(/(?<=[.!?])\s+/).some((x) => {
+    const m = WAITING_RE.exec(x.trim());
+    // What it waits on: from the waiting words to the sentence end, minus an aside ("(the user is busy)").
+    return m && !notOurs(x.trim().slice(m.index).replace(/^[;,:–—\s]+/, "").split(/[(;]/)[0]);
+  });
+function answered(threadId, t) {
+  const text = lastReplyOf(threadId, t);
+  return asksVerdict ? VERDICT_RE.test(text) : !waitingOnly(text);
+}
+const waitNudge = () => reviewsVerdict() ? VERDICT_NUDGE
+  : "Your last turn ended on waiting, so whatever you were waiting for can't reach your lead. Check it now: read its output, or wait for it inside this turn (t3_background_wait on its task, or run it in the foreground with a fitting timeout), then send your full report"
+    + (asksVerdict ? " ending in \"VERDICT: DONE\" or \"VERDICT: BLOCKED\"" : "") + ". Don't end the turn waiting.";
+async function awaitAnswer(threadId, thread) {
+  const waitMs = Number(process.env.VERDICT_WAIT_MIN ?? 15) * 60000;
+  const why = (t) => waitingOnly(lastReplyOf(threadId, t)) ? "waiting reply" : "no verdict";
+  let nudged = false;
+  for (let turn = 0; turn < 4 && !answered(threadId, thread); turn++) {
+    log(why(thread), "in", thread.latestRunId, nudged ? "after the nudge" : "", `; waiting ${waitMs / 60000} min for the thread's next turn`);
+    let r = await waitTurn(threadId, { priorRunId: thread.latestRunId, sent: true, startWithinMs: waitMs });
+    if (r.noStart) {
+      if (nudged) break;
+      nudged = true;
+      const nudge = waitNudge();
+      log(nudge === VERDICT_NUDGE ? "asking for the verdict" : "asking the worker to finish", threadId);
+      console.error(nudge === VERDICT_NUDGE ? "reviewer ended a turn without a verdict: asked it to finish" : `ended a turn on ${why(thread)}: asked it to finish`);
+      await sendMessage(threadId, nudge, { mode: "queue", modelSelection, label: `finish ${path.basename(job)}` });
+      r = await waitTurn(threadId, { priorRunId: thread.latestRunId, sent: true });
+    }
+    if (r.timedOut || r.rc) return r;
+    thread = r.thread;
+  }
+  if (!answered(threadId, thread)) {
+    log(`${why(thread)}; report.md is the thread's last reply`);
+    console.error(asksVerdict && why(thread) === "no verdict" ? "no VERDICT line in the reviewer's last reply" : "the thread's last reply still only says it is waiting");
+  }
+  return { thread, rc: 0 };
 }
 
 // Limit go-around: a Claude worker on the main account moves to its overflow account
