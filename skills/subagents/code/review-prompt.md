@@ -21,8 +21,18 @@ them block APPROVE.
 Always REVISE for: <the project's never-ship classes, e.g. a secret leak, a duplicate
 consequential effect such as a second email, unrecoverable data loss>.
 
+Sweep each finding. Before you write up a blocker or should, search the stage's whole scope for
+every other place with the same cause: other call sites, branches and files the stage touches,
+other wordings or spellings of the same input, and the tests that should cover each. List them
+all under that one finding, so one fix round closes them all (one more sibling per recheck burns
+the round budget). A same-cause place outside the stage's files goes in the packet's
+`Elsewhere:` list, not in a finding.
+
 Run: <exact test / bench / lint commands>.
 
 Write the FULL packet to your final message (it is saved as the report), not a
-summary: findings (location / trigger / smallest fix), evidence, commands run
-with results, and a last line of exactly "VERDICT: APPROVE" or "VERDICT: REVISE".
+summary: findings with stable ids (`F1 [blocker|should|nit] location / trigger / smallest fix`),
+under each blocker and should a `sites:` line (every same-cause place from the sweep) and a
+`class:` line (the cause in a few plain words; `class: one-off` when nothing else could share
+it), evidence, commands run with results, `Elsewhere: <same-cause places outside the stage | none>`,
+and a last line of exactly "VERDICT: APPROVE" or "VERDICT: REVISE".

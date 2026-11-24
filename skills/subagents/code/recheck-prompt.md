@@ -8,6 +8,9 @@ Closed since then: <finding -> fix, with line refs>.
 Scope: only <changed files>.
 
 Check that each open finding is really fixed, and look for regressions in the
-touched code. Do not re-review the whole stage. Rerun: <exact commands>.
+touched code. Do not re-review the whole stage. A finding is resolved only when every place on
+its `sites:` line is fixed. For each one, sweep the changed files once for its `class:` and list
+every place still open under that same id in this pass (not one per recheck, not as a new id).
+Rerun: <exact commands>.
 Final message: per-finding status, any new regression, then
 "VERDICT: APPROVE" or "VERDICT: REVISE". REVISE only for issues users would plausibly hit in daily use; theoretical or hardening-only items go under "Optional".
