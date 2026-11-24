@@ -12,5 +12,7 @@ touched code. Do not re-review the whole stage. A finding is resolved only when 
 its `sites:` line is fixed. For each one, sweep the changed files once for its `class:` and list
 every place still open under that same id in this pass (not one per recheck, not as a new id).
 Rerun: <exact commands>.
-Final message: per-finding status, any new regression, then
+Final message: per-finding status, any new regression; under every still-open or new
+blocker and should its `sites:` and `class:` lines (as in the review packet), then
+`Elsewhere: <places outside the stage, with their F id | none>`, then
 "VERDICT: APPROVE" or "VERDICT: REVISE". REVISE only for issues users would plausibly hit in daily use; theoretical or hardening-only items go under "Optional".

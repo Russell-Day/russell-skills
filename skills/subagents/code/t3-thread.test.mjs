@@ -538,6 +538,8 @@ function handoffHome(rows, items = []) {
   };
 }
 
+// A completed turn without VERDICT: DONE: the successor is told, even with no task to copy (final r3 F1).
+const UNFINISHED = "Its edits are uncommitted in the tree: read `git status` and `git diff` for its files first and keep what it finished. Its last turn ended without `VERDICT: DONE`: its work is not finished (its report may be from an earlier round; one ending `HANDOFF:` lists what is left). Compare the diff with the original task and its last round, finish what is missing, then do the round at the end, if any.\n\n";
 test("handoff: CONTINUE after 3 compactions opens a fresh thread told the old one, its report and PLAN", () => {
   const f = handoffHome(threeCompactions);
   const r = ok(f.run({ PLAN: "/p/plan.md" }));
@@ -550,7 +552,7 @@ test("handoff: CONTINUE after 3 compactions opens a fresh thread told the old on
   const starts = f.sent("message.dispatch");
   assert.deepEqual(starts.map((s) => s.threadId), [created.threadId], "the old thread gets no turn");
   assert.equal(starts[0].text,
-    `You take over from thread ${longThread}; its last report is ${path.join(f.jobDir, "report.md")}.\nPLAN: /p/plan.md\n\n${fs.readFileSync(path.join(f.jobDir, "prompt.md"), "utf8")}`);
+    `You take over from thread ${longThread}; its last report is ${path.join(f.jobDir, "report.md")}.\nPLAN: /p/plan.md\n\n${UNFINISHED}${fs.readFileSync(path.join(f.jobDir, "prompt.md"), "utf8")}`);
   assert.equal(f.read("thread_id"), created.threadId);
   assert.equal(f.read("thread_ids_prev"), `${longThread}\n`);
   assert.deepEqual(f.sent("thread.settle").map((c) => c.threadId), [longThread, created.threadId]);
@@ -594,6 +596,57 @@ test("handoff: a worker's fix round at 2 compactions goes to a fresh thread; no 
   assert.notEqual(s.threadId, longThread);
   assert.ok(!s.text.includes("PLAN:"));
   assert.ok(f.read("run.log").includes("(2 compactions)"));
+});
+
+test("handoff: a worker's successor gets the original task and its last round once, then this round; only VERDICT: DONE is finished", () => {
+  const task = "Implement S2: own a.py. Verify: pytest a.";
+  const home = (f) => path.dirname(f.prompt);
+  const addFirst = (f, text) => { const d = f.db(); d.messages.unshift({ thread_id: longThread, message_id: "first", run_id: `run:${longThread}:1`, role: "user", text, created_at: "2026-10-10T00:00:00Z" }); fs.writeFileSync(path.join(home(f), "t3.json"), JSON.stringify(d)); };
+  const f = handoffHome(threeCompactions.slice(0, 3));
+  addFirst(f, task);
+  ok(f.run());
+  const [s] = f.sent("message.dispatch");
+  assert.ok(s.text.includes(`<<<ORIGINAL TASK\n${task}\nORIGINAL TASK>>>\n\n## This round\n\nfix finding 2`), s.text);
+  assert.ok(s.text.includes("Its last turn ended without `VERDICT: DONE`: its work is not finished"));
+  const g = handoffHome(threeCompactions.slice(0, 3));
+  addFirst(g, s.text);
+  fs.writeFileSync(g.prompt, "fix finding 3");
+  ok(g.run());
+  const [t] = g.sent("message.dispatch");
+  assert.equal(t.text.split("<<<ORIGINAL TASK").length, 2, t.text);
+  assert.equal(t.text.split("You take over from").length, 2, t.text);
+  assert.ok(t.text.includes(`<<<ORIGINAL TASK\n${task}\nORIGINAL TASK>>>\n\n## Its last round\n\n<<<LAST ROUND\nfix finding 2`), t.text);
+  assert.ok(t.text.includes("LAST ROUND>>>\n\n## This round\n\nfix finding 3"), t.text);
+  const d = handoffHome(threeCompactions.slice(0, 3));
+  addFirst(d, task);
+  const db = d.db(); db.messages.find((m) => m.message_id === "old-reply").text = "F1 fixed.\n\nVERDICT: DONE"; fs.writeFileSync(path.join(home(d), "t3.json"), JSON.stringify(db));
+  ok(d.run());
+  assert.ok(d.sent("message.dispatch")[0].text.includes("Its last turn completed with `VERDICT: DONE`"));
+  // A reply that only mentions the verdict mid-line isn't finished (final r3 F1).
+  const no = handoffHome(threeCompactions.slice(0, 3));
+  addFirst(no, task);
+  const nodb = no.db(); nodb.messages.find((m) => m.message_id === "old-reply").text = "Retry still fails. I cannot give VERDICT: DONE"; fs.writeFileSync(path.join(home(no), "t3.json"), JSON.stringify(nodb));
+  ok(no.run());
+  assert.ok(no.sent("message.dispatch")[0].text.includes("Its last turn ended without `VERDICT: DONE`: its work is not finished"));
+  // The lead resends the exact original brief: no task copy, but the unfinished-turn warning stays (final r3 F1).
+  const same = handoffHome(threeCompactions.slice(0, 3));
+  const sent = s.text.split("## This round\n\n")[1];
+  addFirst(same, sent);
+  ok(same.run());
+  const st = same.sent("message.dispatch")[0].text;
+  assert.ok(!st.includes("<<<ORIGINAL TASK"), st);
+  assert.ok(st.includes("Its last turn ended without `VERDICT: DONE`: its work is not finished"), st);
+  assert.ok(st.endsWith(sent), st);
+});
+
+test("handoff: HANDOFF_COMPACTIONS doesn't turn a reviewer into a worker (final F5)", () => {
+  const f = handoffHome(threeCompactions);
+  const d = f.db(); d.messages.unshift({ thread_id: longThread, message_id: "first", run_id: `run:${longThread}:1`, role: "user", text: "REVIEW ONLY. the stage", created_at: "2026-10-10T00:00:00Z" }); fs.writeFileSync(path.join(path.dirname(f.prompt), "t3.json"), JSON.stringify(d));
+  fs.writeFileSync(f.prompt, "RECHECK ONLY. F1 only");
+  f.run({ HANDOFF_COMPACTIONS: "3" });
+  const [s] = f.sent("message.dispatch");
+  assert.ok(s && s.threadId !== longThread, "handed off");
+  assert.ok(!s.text.includes("ORIGINAL TASK") && !s.text.includes("git diff"), s.text);
 });
 
 test("handoff: an Opus review (RECHECK ONLY brief or a -review JOB) keeps a reviewer's 3", () => {

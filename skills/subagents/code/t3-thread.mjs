@@ -64,7 +64,7 @@ import os from "node:os";
 import path from "node:path";
 import { claude as claudeAccount, codexAccount as codexAccountByName, codexByInstance, codexDefault, codexFallback } from "./accounts.mjs";
 import { agyOutUntil, noticeOnce, recordQuotaError } from "./agy-state.mjs";
-import { abandonThread, compactionCount as compactions, createMainThread, createThread, currentThread, getThread, interruptThread, mainModelSelection, orchestratorArgs, projectFor, renameThread, runReplies, sendMessage, settleThread, workerThreadTitle } from "./t3-api.mjs";
+import { abandonThread, compactionCount as compactions, createMainThread, createThread, currentThread, getThread, interruptThread, mainModelSelection, orchestratorArgs, projectFor, renameThread, runReplies, sendMessage, settleThread, t3Query, workerThreadTitle } from "./t3-api.mjs";
 
 if (process.argv[2] === "--compactions") {
   const threadId = process.argv[3] ?? currentThread();
@@ -362,6 +362,42 @@ let handoff = null;
 // `thread_id` or a `thread_ids_prev` line). This job's own record wins (a recheck); else the
 // first other job found, or null when no job dir knows the thread.
 const REVIEWERS = ["sol62", "sol61", "terra61", "astra"];
+
+// A worker's successor gets the task the stage started with once: its owned files, rules and
+// Verify commands, plus the round it was last given. A successor's own first message carries both
+// between these markers, so a later hand-off takes them out again instead of nesting the first takeover.
+const TASK_OPEN = "<<<ORIGINAL TASK", TASK_CLOSE = "ORIGINAL TASK>>>", ROUND_OPEN = "<<<LAST ROUND", ROUND_CLOSE = "LAST ROUND>>>";
+const wrapTask = (text) => `${TASK_OPEN}\n${text.trim()}\n${TASK_CLOSE}`;
+const wrapRound = (text) => `${ROUND_OPEN}\n${text.trim()}\n${ROUND_CLOSE}`;
+function between(text, open, close) {
+  const i = text.indexOf(`${open}\n`), j = i < 0 ? -1 : text.indexOf(`\n${close}`, i);
+  return j < 0 ? null : text.slice(i + open.length + 1, j);
+}
+const unwrapTask = (text) => between(text, TASK_OPEN, TASK_CLOSE) ?? text;
+// The round a thread was last given: a later lead message as it is; a successor's only message: what
+// follows its blocks (the lead's findings, or its "## This round"), else its LAST ROUND block.
+function lastRound(asks) {
+  if (asks.length > 1) return (asks.at(-1).text ?? "").trim();
+  const first = asks[0]?.text ?? "";
+  const end = Math.max(...[TASK_CLOSE, ROUND_CLOSE].map((c) => { const k = first.lastIndexOf(`\n${c}`); return k < 0 ? -1 : k + c.length + 1; }));
+  if (end < 0) return "";
+  return first.slice(end).replace(/^\s*## This round\s*/, "").trim() || (between(first, ROUND_OPEN, ROUND_CLOSE) ?? "").trim();
+}
+// Finished only when it says so (final F1): its latest turn completed and that turn's reply ends
+// `VERDICT: DONE` on a line of its own ("I cannot give VERDICT: DONE" is not). An older round's report never counts.
+function turnState(snap, threadId) {
+  const reply = snap.status === "completed" && snap.latestRunId ? (runReplies(threadId, snap.latestRunId).at(-1) ?? "").trim() : "";
+  return /(^|\n)[ \t]*VERDICT:[ \t]*DONE[ \t]*$/.test(reply)
+    ? " Its last turn completed with `VERDICT: DONE`: don't redo the stage or that round; do the round at the end."
+    : ` Its last turn ${snap.status === "completed" ? "ended without `VERDICT: DONE`" : `did not finish (${snap.status})`}: its work is not finished`
+      + " (its report may be from an earlier round; one ending `HANDOFF:` lists what is left). Compare the diff with the original task and its last round,"
+      + " finish what is missing, then do the round at the end, if any.";
+}
+// The lead's messages on a thread: user turns minus background-task notifications and T3's limit resumes.
+function leadMessages(threadId) {
+  return t3Query("select message_id, payload_json from orchestration_v2_projection_messages where thread_id = ? and role = 'user' order by created_at, message_id", [threadId])
+    .map((m) => ({ id: m.message_id, ...JSON.parse(m.payload_json) })).filter((m) => !m.notification && !m.id.startsWith("limit-resume:"));
+}
 const recorded = (dir, threadId) => ["thread_id", "thread_ids_prev"].some((f) => {
   try { return fs.readFileSync(path.join(dir, f), "utf8").split(/\s+/).includes(threadId); } catch { return false; }
 });
@@ -395,13 +431,15 @@ async function runThread(attempt) {
     // the fallback): a fresh Haiku thread takes the same job.
     const until = snap.modelSelection?.instanceId === "antigravity" ? agyOutUntil() : null;
     const n = compactions(attach);
+    // A reviewer keeps its role whatever HANDOFF_COMPACTIONS says.
+    const reviewer = isReview || REVIEWERS.includes(labelFor(snap.modelSelection?.model) ?? model);
     if (until) {
       log("continue: AGY is out; a fresh thread takes the job instead of", attach);
       await abandon(attach, "AGY is out");
       if (label === "gemini-flash") toHaiku(until);
       attach = undefined;
       snap = undefined;
-    } else if (n >= Number(process.env.HANDOFF_COMPACTIONS ?? (isReview || REVIEWERS.includes(labelFor(snap.modelSelection?.model) ?? model) ? 3 : 2))) {
+    } else if (n >= Number(process.env.HANDOFF_COMPACTIONS ?? (reviewer ? 3 : 2))) {
       // A long thread hands off: a new thread on the same model and effort takes the job,
       // once the old thread's turn has ended and its reply is saved as the last report.
       if (snap.busy) {
@@ -415,10 +453,22 @@ async function runThread(attempt) {
         snap = done.thread;
       }
       saveReport(snap, true);
+      // A worker's successor gets the stage's original task and its last round once, with this round.
+      let task = "", prev = "", state = "";
+      if (!reviewer) {
+        try { const asks = leadMessages(attach); task = unwrapTask(asks[0]?.text ?? "").trim(); prev = lastRound(asks); state = turnState(snap, attach); }
+        catch (e) { log("handoff: original task", e.message); }
+      }
+      if (task === unwrapTask(prompt).trim()) task = "";
+      if (prev === prompt.trim()) prev = "";
       await abandon(attach, "handoff");
       const title = !process.env.TITLE && snap.title ? snap.title : null;
       handoff = { from: attach, n, title,
-        text: `You take over from thread ${attach}; its last report is ${path.join(job, "report.md")}.${process.env.PLAN ? `\nPLAN: ${process.env.PLAN}` : ""}\n\n${prompt}` };
+        text: `You take over from thread ${attach}; its last report is ${path.join(job, "report.md")}.${process.env.PLAN ? `\nPLAN: ${process.env.PLAN}` : ""}\n\n`
+          + (task || state ? `Its edits are uncommitted in the tree: read \`git status\` and \`git diff\` for its files first and keep what it finished.${state}\n\n` : "")
+          + (task ? `Its original task, for owned files, rules and Verify commands:\n\n${wrapTask(task)}\n\n`
+            + (prev ? `## Its last round\n\n${wrapRound(prev)}\n\n` : "") + "## This round\n\n" : "")
+          + prompt };
       if (snap.modelSelection && !process.env.EFFORT) adopt(current(snap.modelSelection));
       if (modelSelection.instanceId === claudeAccount.t3Instance) modelSelection = { ...modelSelection, instanceId: claudeAccount.t3WorkerInstance };
       attach = undefined;

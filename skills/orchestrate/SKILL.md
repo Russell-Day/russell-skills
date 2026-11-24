@@ -225,8 +225,11 @@ ATTACH=$(cat ~/.local/state/agent-jobs/<prefix><stage>-impl/thread_id) CONTINUE=
 
 A worker at 2+ compactions gets no new round: `CONTINUE=1` (or a project's
 `--next-round`) moves it to a fresh thread with the old id, last report, PLAN,
-brief and findings (a fix round on a longer thread often ends before any edit);
-the successor does that round, not the stage again.
+its original task and last round (once each, for owned files, rules and Verify
+commands) and the findings (a fix round on a longer thread often ends before
+any edit). The successor skips the stage and that round only when the worker's
+last turn completed with `VERDICT: DONE`; otherwise it finishes them first.
+Hand off only after the worker's turn has ended.
 A stage whose first turn compacts 3+ times was too big: split what's left. Then a targeted recheck on the **same reviewer thread**
 with the subagents `recheck-prompt.md` (`ATTACH=<review thread> CONTINUE=1`),
 naming only the open finding ids. When the fix changed code, the recheck
@@ -239,8 +242,9 @@ blocker or should whose `class:` isn't `one-off`, with the packet's
 `<class> (S<n> F<id>): <the fix pattern>; elsewhere: <places | none>`. Then,
 before any later stage reaches review:
 - a stage not yet dispatched gets the section in its worker prompt;
-- a worker already running gets the new lines as one round (a project's
-  `--next-round`, else `t3_thread_send`) before its review is launched:
+- a worker already running gets the new lines as one round once its turn
+  has ended (a project's `--next-round`, else `t3_thread_send`), before its
+  review is launched:
   "apply these to your files, then report";
 - a stage the lead writes: the lead applies them before sending it for review;
 - the review prompt's `Review lessons:` slot carries the section, and the

@@ -36,5 +36,5 @@ Write the FULL packet to your final message (it is saved as the report), not a
 summary: findings with stable ids (`F1 [blocker|should|nit] location / trigger / smallest fix`),
 under each blocker and should a `sites:` line (every same-cause place from the sweep) and a
 `class:` line (the cause in a few plain words; `class: one-off` when nothing else could share
-it), evidence, commands run with results, `Elsewhere: <same-cause places outside the stage | none>`,
+it), evidence, commands run with results, `Elsewhere: <same-cause places outside the stage, with their F id | none>`,
 and a last line of exactly "VERDICT: APPROVE" or "VERDICT: REVISE".
