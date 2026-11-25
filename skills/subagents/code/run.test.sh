@@ -20,6 +20,7 @@ setup() {
 #!/usr/bin/env bash
 cat >/dev/null
 printf '%s\n' "$@" >"$HOME/claude.args"
+printenv BRIEF_LOCK_TAG >"$HOME/claude.tag"
 [[ -z ${CLAUDE_SLEEP:-} ]] || { : >"$HOME/claude.started"; sleep "$CLAUDE_SLEEP"; }
 echo "haiku report"
 EOF
@@ -49,6 +50,7 @@ EOF
   cat >"$bin/codex" <<'EOF2'
 #!/usr/bin/env bash
 echo "$CODEX_HOME" >>"$HOME/codex.homes"
+[[ -z ${CODEX_SLEEP:-} ]] || { : >"$HOME/codex.started"; sleep "$CODEX_SLEEP"; }
 [[ $CODEX_HOME == "${LIMIT_HOME:-}" ]] && { echo "ERROR: You've hit your usage limit." >&2; exit 1; }
 while [[ $# -gt 0 ]]; do [[ $1 == -o ]] && { echo "codex report" >"$2"; shift; }; shift; done
 EOF2
@@ -75,7 +77,7 @@ launch() { launch_as gemini-flash "$@"; }
 launch_as() {  # $1 model label, $2 JOB, rest: extra env
   local model=$1 job=$2; shift 2
   env -i PATH="$bin:$PATH" HOME="$HOME_" ACCOUNTS_FILE="$ACCOUNTS_FILE" AGENT_JOBS_DIR="$jobs" JOB="$job" TIMEOUT=60s \
-    MESSAGE_BOARD_SCRIPT="$bin/board-ok" "$@" bash "$run_sh" "$model" "$HOME_/prompt.md" >/dev/null 2>"$HOME_/stderr"
+    MESSAGE_BOARD_SCRIPT="$bin/board-ok" "$@" bash "$run_sh" "$model" "${BRIEF:-$HOME_/prompt.md}" >/dev/null 2>"${STDERR_TO:-$HOME_/stderr}"
 }
 
 check() {  # $1 description, rest: test command
@@ -213,6 +215,54 @@ sys.exit(not (f[19] == start and "run.sh" in open(f"/proc/{pid}/cmdline").read()
 wait $lp
 launch_as haiku lead1
 check "lead: a rerun outside T3 leaves no lead_thread" test ! -e "$jobs/lead1/lead_thread"
+
+# One run per brief file. A second run of a brief that is running (by any path to it) exits 75,
+# names the holder and makes no job dir; another brief, or the same brief after the first run
+# ended, runs; the harness doesn't get the lock.
+setup
+launch_as haiku once1 CLAUDE_SLEEP=2 & lp=$!
+for _ in $(seq 50); do [[ -e $HOME_/claude.started ]] && break; sleep 0.1; done
+STDERR_TO=$HOME_/stderr2 launch_as haiku once2; rc=$?
+check "brief lock: a second run of a running brief exits 75" test $rc -eq 75
+check "brief lock: it names the holder's job and pid" bash -c "grep -q 'is already running: pid=[0-9]* job=$jobs/once1 model=haiku' '$HOME_/stderr2'"
+check "brief lock: the refused run made no job dir" test ! -e "$jobs/once2"
+mkdir -p "$HOME_/via"; ln -sf "$HOME_/prompt.md" "$HOME_/via/link.md"
+BRIEF=$HOME_/via/link.md STDERR_TO=$HOME_/stderr3 launch_as haiku once3; rc=$?
+check "brief lock: the same brief through a symlink is refused too" test $rc -eq 75 -a ! -e "$jobs/once3"
+BRIEF="$HOME_/via/../prompt.md" STDERR_TO=$HOME_/stderr3 launch_as haiku once4; rc=$?
+check "brief lock: ... and through a relative-looking path" test $rc -eq 75 -a ! -e "$jobs/once4"
+cp "$HOME_/prompt.md" "$HOME_/other.md"
+BRIEF=$HOME_/other.md launch_as haiku other1; rc=$?
+check "brief lock: another brief runs meanwhile" test $rc -eq 0 -a -e "$jobs/other1/report.md"
+wait $lp
+check "brief lock: the first run finished" test "$(cat "$jobs/once1/exit_code")" = 0
+launch_as haiku once5; rc=$?
+check "brief lock: the brief runs again once the first run ended" test $rc -eq 0 -a -e "$jobs/once5/report.md"
+check "brief lock: the harness doesn't carry the keeper's tag" test -e "$HOME_/claude.tag" -a ! -s "$HOME_/claude.tag"
+mv "$bin/claude" "$bin/claude-real"
+printf '#!/usr/bin/env bash\nls -l /proc/$$/fd >"$HOME/claude.fds"; cat >/dev/null; echo "haiku report"\n' >"$bin/claude"; chmod +x "$bin/claude"
+launch_as haiku fd1
+check "brief lock: the harness doesn't inherit the lock" bash -c "test -s '$HOME_/claude.fds' && ! grep -q '.brief-locks' '$HOME_/claude.fds'"
+mv "$bin/claude-real" "$bin/claude"
+# Review F3: run.sh killed by SIGKILL mid-attempt: the brief stays locked while its harness still
+# runs, and is free again once the harness ended.
+kill9_case() {  # $1 model label, $2 harness sleep var, $3 label
+  local m=$1 var=$2 what=$3 rp rc
+  setup
+  mkdir -p "$HOME_/.codex"; echo '{"models":[{"slug":"gpt-6.2-sol"}]}' >"$HOME_/.codex/models_cache.json"
+  launch_as "$m" k9a "$var=3" ${K9_ENV:-} & local lp=$!
+  for _ in $(seq 50); do [[ -e $HOME_/${STARTED:-claude.started} ]] && break; sleep 0.1; done
+  rp=$(pgrep -of "run.sh $m $HOME_/prompt.md")
+  kill -9 "$rp"; wait "$lp" 2>/dev/null   # the moment the harness starts
+  sleep 1.5   # past the keeper's first look
+  STDERR_TO=$HOME_/stderr2 launch_as "$m" k9b ${K9_ENV:-}; rc=$?
+  check "brief lock: $what harness alive after run.sh was SIGKILLed -> exit 75" test $rc -eq 75 -a ! -e "$jobs/k9b"
+  sleep 4
+  launch_as "$m" k9c ${K9_ENV:-}; rc=$?
+  check "brief lock: $what harness ended -> the brief runs again" test $rc -eq 0
+}
+kill9_case haiku CLAUDE_SLEEP claude
+STARTED=codex.started kill9_case sol62 CODEX_SLEEP codex
 
 echo "$((n - fails))/$n passed"
 [[ $fails -eq 0 ]]

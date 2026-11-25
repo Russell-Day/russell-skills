@@ -1,6 +1,7 @@
 REVIEW ONLY. Do not edit, stash, reset, checkout, start servers, or make live calls.
 Project hard rules: <copy them from AGENTS.md / CLAUDE.md, e.g. "never call the local model host">.
 Run tests and linters freely; anything that mutates state runs in a scratch copy under /tmp.
+Never run a package install (npm, pnpm, yarn or bun install, add, ci or update) in a scratch copy whose node_modules links to the main tree's: the install writes through the link and rewires the main tree. Never link a node_modules by hand. A copy that needs its own deps deletes the link (only the link) and installs offline from the lockfile (`pnpm install --frozen-lockfile --offline`, `npm ci --offline`); otherwise run those tests read-only in the main tree.
 Do your own searching, reading, test runs and probes. Do not start subagents, helpers or other reviewers.
 
 Stage: <id/title>. Read <plan sections>.

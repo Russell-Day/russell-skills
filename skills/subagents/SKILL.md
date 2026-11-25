@@ -179,7 +179,9 @@ while working and the wider suite once at the end.
 - **Use helpers for** a lead's research: searches and caller tracing, long
   files, logs or docs returned as excerpts, inventories and web research.
 - **Dispatch helpers headless** through `run.sh`, not `t3-thread.mjs`. Give each
-  a unique `JOB`, and run independent ones in parallel.
+  a unique `JOB`, and run independent ones in parallel. `run.sh` refuses a
+  second run of a brief file that is still running (exit 75, naming the run
+  that holds it); copy the brief to run it twice on purpose.
 - **Ask for paths, line refs and evidence,** and spot-check consequential claims.
 - **Helpers stay read-only** unless given disjoint file ownership.
 - **Workers start no helpers or subagents.** Put this rule in every worker

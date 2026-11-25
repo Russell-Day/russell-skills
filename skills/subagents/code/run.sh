@@ -53,7 +53,43 @@ case $model in
 esac
 label=$model fallback_from=""
 
-job=${AGENT_JOBS_DIR:-$HOME/.local/state/agent-jobs}/${JOB:-$(date +%Y%m%d-%H%M%S)-$model}
+jobs_root=${AGENT_JOBS_DIR:-$HOME/.local/state/agent-jobs}
+job=$jobs_root/${JOB:-$(date +%Y%m%d-%H%M%S)-$model}
+# One run per brief file: a caller that sees `setsid … &` print Done and relaunches would run the
+# brief twice. The lock is per real path and held by this run.sh until it exits; the harness
+# doesn't inherit it (agy can leave a hub daemon running). A refused run (exit 75) makes no job
+# dir. To run a brief twice on purpose, copy it.
+brief_real=$(realpath -e -- "$prompt_src")
+mkdir -p "$jobs_root/.brief-locks"
+brief_lock=$jobs_root/.brief-locks/$(printf '%s' "$brief_real" | sha256sum | cut -c1-16).lock
+exec 8<>"$brief_lock"
+if ! flock -n 8; then
+  holder=$(head -n1 "$brief_lock" 2>/dev/null) || holder=""
+  echo "run.sh: $prompt_src is already running: ${holder:-holder unknown} (end that run first, or copy the brief to run it twice)" >&2
+  exit 75
+fi
+printf 'pid=%s job=%s model=%s brief=%s started=%s\n' "$$" "$job" "$model" "$brief_real" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >"$brief_lock"
+# A keeper holds the lock too, until run.sh and every harness it started are gone: a run.sh
+# killed by SIGKILL mid-attempt doesn't free the brief while its harness still runs. Each
+# harness's timeout(1) is started with BRIEF_LOCK_TAG=$brief_tag in its environment and starts
+# its child with the tag unset, so exactly that process carries it, from its exec on; a daemon
+# the harness leaves behind doesn't. Once run.sh is gone (or a zombie), the keeper holds the
+# lock while any process carries the tag, and lets go after two empty looks 0.2 s apart (a fork
+# about to exec a harness is never missed). run.sh ends it on exit.
+brief_tag="$brief_lock:$$"
+keep_brief_lock() {
+  local parent=$1 s
+  while s=$(cat "/proc/$parent/stat" 2>/dev/null) && s=${s##*) } && [[ ${s%% *} != Z ]]; do
+    sleep "${BRIEF_KEEPER_SECS:-1}" 8>&-   # a sleep left over when the keeper is killed holds nothing
+  done
+  while tagged || { sleep 0.2 8>&-; tagged; }; do
+    sleep "${BRIEF_KEEPER_SECS:-1}" 8>&-
+  done
+}
+tagged() { grep -qsxzF -- "BRIEF_LOCK_TAG=$brief_tag" /proc/[0-9]*/environ; }
+keep_brief_lock "$$" </dev/null >/dev/null 2>&1 &
+brief_keeper=$!
+trap 'kill "$brief_keeper" 2>/dev/null || true' EXIT
 mkdir -p "$job"
 # The T3 thread that started this helper ("<thread id> <pid> <start time>"), so a sidebar can
 # show that thread as waiting on it while this run.sh lives. Removed first, so a reused job dir
@@ -117,26 +153,26 @@ PY2
   # models fail at once with "Daybreak is unavailable for model ..."; turn it off here.
   # Prompt as an argument from the file (no quoting hazards); </dev/null or a
   # backgrounded Codex waits on stdin until the timeout.
-  env CODEX_HOME="$home" timeout --kill-after="$kill_after" "$timeout_" codex exec --yolo --skip-git-repo-check \
+  env CODEX_HOME="$home" BRIEF_LOCK_TAG="$brief_tag" timeout --kill-after="$kill_after" "$timeout_" env -u BRIEF_LOCK_TAG codex exec --yolo --skip-git-repo-check \
     -C "$cwd" -m "$id" -c "model_reasoning_effort=\"$effort\"" -c daybreak=false -o "$report" \
-    "$(cat "$job/prompt.md")" </dev/null >>"$log" 2>&1
+    "$(cat "$job/prompt.md")" </dev/null >>"$log" 2>&1 8>&-
 }
 
 run_claude() {
   config_dir=$(node "$accounts" claude-config-dir) || return 2  # attempts.jsonl records it
   (cd "$cwd" && env -u CLAUDECODE CLAUDE_CONFIG_DIR="$config_dir" \
     CLAUDE_CODE_AUTO_COMPACT_WINDOW=200000 \
-    timeout --kill-after="$kill_after" "$timeout_" claude -p --model "$id" --effort "$effort" \
+    BRIEF_LOCK_TAG="$brief_tag" timeout --kill-after="$kill_after" "$timeout_" env -u BRIEF_LOCK_TAG claude -p --model "$id" --effort "$effort" \
     --dangerously-skip-permissions --output-format text --session-id "$session_id" \
-    <"$job/prompt.md" >"$report" 2>>"$log")
+    <"$job/prompt.md" >"$report" 2>>"$log" 8>&-)
 }
 
 run_agy() {
   # AGY's cwd does not contain its file tools; --add-dir admits the worker's tree.
-  (cd "$cwd" && timeout --kill-after="$kill_after" "$timeout_" agy --input-format text --output-format json \
+  (cd "$cwd" && env BRIEF_LOCK_TAG="$brief_tag" timeout --kill-after="$kill_after" "$timeout_" env -u BRIEF_LOCK_TAG agy --input-format text --output-format json \
     --model "$id" --effort "$effort" --mode accept-edits \
     --dangerously-skip-permissions --add-dir "$cwd" --print-timeout 0 \
-    <"$job/prompt.md" >"$job/result.json" 2>>"$log")
+    <"$job/prompt.md" >"$job/result.json" 2>>"$log" 8>&-)
   local status=$?
   # status SUCCESS only means a response exists; the text goes to report.md.
   python3 - "$job/result.json" "$report" <<'PY2' || true

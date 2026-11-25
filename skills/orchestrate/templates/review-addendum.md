@@ -7,7 +7,9 @@ For each item in the stage, the worker's packet has a block
 3. the test would fail without the change (revert the key line yourself in
    /tmp/<verify-dir> and rerun, when cheap; the copy runs the
    repo's interpreter by absolute path, never a symlinked or copied venv, and
-   never uv or pip);
+   never uv or pip, nor a package install through a node_modules linked to
+   the main tree: delete the link and install offline from the lockfile, or
+   test read-only in the main tree);
 4. anything marked "manual step" really cannot be a test.
 A missing, mismatched or tautological expectation is a REVISE finding, not
 Optional. Propose the extra test in one line when one is obvious.

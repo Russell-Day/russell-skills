@@ -1,5 +1,6 @@
 RECHECK ONLY. Same boundary as the prior review: do not edit, stash, reset, or checkout.
 Project hard rules: <same as the review prompt>.
+Never run a package install (npm, pnpm, yarn or bun install, add, ci or update) in a scratch copy whose node_modules links to the main tree's: the install writes through the link and rewires the main tree. Never link a node_modules by hand. A copy that needs its own deps deletes the link (only the link) and installs offline from the lockfile (`pnpm install --frozen-lockfile --offline`, `npm ci --offline`); otherwise run those tests read-only in the main tree.
 Do your own searching, reading, test runs and probes. Do not start subagents, helpers or other reviewers.
 
 Prior packet: <~/.local/state/agent-jobs/<job>/report.md>.
