@@ -9,7 +9,8 @@ import { test } from "node:test";
 import { claude, codexAccounts, codexDefault } from "./accounts.mjs";
 import { PROJECT, fakeHome } from "./testdata/fake-home.mjs";
 
-const script = path.join(path.dirname(new URL(import.meta.url).pathname), "t3-thread.mjs");
+// T3_THREAD_SCRIPT runs the suite on a scratch copy before it replaces the live launcher.
+const script = process.env.T3_THREAD_SCRIPT ?? path.join(path.dirname(new URL(import.meta.url).pathname), "t3-thread.mjs");
 const ok = (r) => { assert.equal(r.status, 0, `exit ${r.status}: ${r.stderr}${r.stdout}`); return r; };
 
 test("dispatcher: TITLE becomes the worker thread's title in thread.create", () => {
@@ -538,10 +539,12 @@ function handoffHome(rows, items = []) {
   };
 }
 
-// A completed turn without VERDICT: DONE: the successor is told, even with no task to copy (final r3 F1).
-const UNFINISHED = "Its edits are uncommitted in the tree: read `git status` and `git diff` for its files first and keep what it finished. Its last turn ended without `VERDICT: DONE`: its work is not finished (its report may be from an earlier round; one ending `HANDOFF:` lists what is left). Compare the diff with the original task and its last round, finish what is missing, then do the round at the end, if any.\n\n";
+// A completed turn without VERDICT: DONE: the successor is told (final r3 F1); the messages file says per message what is left (plan 1120 S3).
+const UNFINISHED = "Its edits are uncommitted in the tree: read `git status` and `git diff` for its files first and keep what it finished. Its last turn ended without `VERDICT: DONE`: its work is not finished (its report may be from an earlier round; one ending `HANDOFF:` lists what is left).\n\n";
+const pendingOne = (file) => `Every message its lead sent it is in ${file}, oldest first, each headed with how its turn ended. Do every message marked PENDING there, in order (message 1 of 1: those after its last \`VERDICT: DONE\` turn); compare the diff with each first and keep what is already done. Then do this round.\n\n`;
 test("handoff: CONTINUE after 3 compactions opens a fresh thread told the old one, its report and PLAN", () => {
   const f = handoffHome(threeCompactions);
+  setTurns(f, [{ lead: "Implement S2: own a.py.", reply: `reply on ${longThread}` }]);
   const r = ok(f.run({ PLAN: "/p/plan.md" }));
   const [created] = f.sent("thread.create");
   assert.ok(created, "a new thread");
@@ -551,8 +554,9 @@ test("handoff: CONTINUE after 3 compactions opens a fresh thread told the old on
   assert.equal(created.modelSelection.options.find((o) => o.id === "effort").value, "high");
   const starts = f.sent("message.dispatch");
   assert.deepEqual(starts.map((s) => s.threadId), [created.threadId], "the old thread gets no turn");
+  const file = path.join(f.jobDir, "handoff-3-messages.md");
   assert.equal(starts[0].text,
-    `You take over from thread ${longThread}; its last report is ${path.join(f.jobDir, "report.md")}.\nPLAN: /p/plan.md\n\n${UNFINISHED}${fs.readFileSync(path.join(f.jobDir, "prompt.md"), "utf8")}`);
+    `You take over from thread ${longThread}; its last report is ${path.join(f.jobDir, "report.md")}.\nPLAN: /p/plan.md\n\n${UNFINISHED}${pendingOne(file)}Its original task, for owned files, rules and Verify commands:\n\n<<<ORIGINAL TASK\nImplement S2: own a.py.\nORIGINAL TASK>>>\n\nEARLIER LEAD MESSAGES: ${file}\n\n## This round\n\n${fs.readFileSync(path.join(f.jobDir, "prompt.md"), "utf8")}`);
   assert.equal(f.read("thread_id"), created.threadId);
   assert.equal(f.read("thread_ids_prev"), `${longThread}\n`);
   assert.deepEqual(f.sent("thread.settle").map((c) => c.threadId), [longThread, created.threadId]);
@@ -569,8 +573,10 @@ test("handoff: CONTINUE after 3 compactions opens a fresh thread told the old on
 
 test("handoff: T3 refuses to settle the old thread, so no new thread starts; exit 1", () => {
   const f = handoffHome(threeCompactions);
+  setTurns(f, [{ lead: "Implement S2: own a.py.", reply: `reply on ${longThread}` }]);
   const r = f.run({ FAKE_SETTLE_REFUSE: longThread });
   assert.equal(r.status, 1, r.stderr);
+  assert.deepEqual(fs.readdirSync(f.jobDir).filter((n) => /^handoff-/.test(n)), [], "no messages file for a hand-off that didn't happen");
   assert.match(r.stderr, new RegExp(`could not settle ${longThread} \\(handoff\\)`));
   assert.equal(f.sent("thread.create").length, 0);
   assert.equal(f.sent("message.dispatch").length, 0);
@@ -591,6 +597,7 @@ test("handoff: a worker under 2 compactions continues the same thread; the count
 
 test("handoff: a worker's fix round at 2 compactions goes to a fresh thread; no PLAN line without PLAN", () => {
   const f = handoffHome(threeCompactions.slice(0, 3));
+  setTurns(f, [{ lead: "Implement S2: own a.py.", reply: `reply on ${longThread}` }]);
   ok(f.run());
   const [s] = f.sent("message.dispatch");
   assert.notEqual(s.threadId, longThread);
@@ -598,45 +605,391 @@ test("handoff: a worker's fix round at 2 compactions goes to a fresh thread; no 
   assert.ok(f.read("run.log").includes("(2 compactions)"));
 });
 
-test("handoff: a worker's successor gets the original task and its last round once, then this round; only VERDICT: DONE is finished", () => {
-  const task = "Implement S2: own a.py. Verify: pytest a.";
-  const home = (f) => path.dirname(f.prompt);
-  const addFirst = (f, text) => { const d = f.db(); d.messages.unshift({ thread_id: longThread, message_id: "first", run_id: `run:${longThread}:1`, role: "user", text, created_at: "2026-10-10T00:00:00Z" }); fs.writeFileSync(path.join(home(f), "t3.json"), JSON.stringify(d)); };
+// Plan 1120 S3: a worker's successor gets every lead message of the old thread in
+// <job>/handoff-<k>-messages.md, each headed with the turn that answered it and how that turn ended,
+// the original task once in its brief, and a pointer line for a later hand-off. The launcher's own
+// nudges are left out by the exact texts it prints with --nudges (read here, not retyped).
+const NUDGES = JSON.parse(spawnSync(process.execPath, [script, "--nudges"], { encoding: "utf8" }).stdout);
+const [VERDICT_NUDGE_TEXT, WORKER_NUDGE_TEXT, WORKER_VERDICT_NUDGE_TEXT] = NUDGES;
+const workerAppendix = fs.readFileSync(path.join(path.dirname(script), "worker-communication.md"), "utf8");
+const asSent = (brief) => `${brief}\n\n${workerAppendix}`; // what the launcher sends for a worker brief
+const IN_BRIEF = "inlined in the hand-off brief between the ORIGINAL TASK markers";
+const S2_TASK = "Implement S2: own a.py. Verify: pytest a.";
+// The old thread's turns, oldest first: { lead, reply, status = "completed", id, runless } is a user
+// message (none without `lead`) and its run; `runless` adds the message with no run (queued, never started).
+function setTurns(f, turns) {
+  const d = f.db();
+  d.runs = []; d.messages = [];
+  let ordinal = 0;
+  turns.forEach((t, i) => {
+    const at = `2026-10-10T00:${String(i).padStart(2, "0")}:00Z`;
+    if (t.runless) { d.messages.push({ thread_id: longThread, message_id: t.id ?? `lead-${i}`, run_id: null, role: "user", text: t.lead, created_at: at }); return; }
+    const run_id = `run:${longThread}:${++ordinal}`;
+    d.runs.push({ run_id, thread_id: longThread, ordinal, status: t.status ?? "completed", requested_at: at, completed_at: at });
+    if (t.lead != null) d.messages.push({ thread_id: longThread, message_id: t.id ?? `lead-${i}`, run_id, role: "user", text: t.lead, created_at: at });
+    if (t.reply) d.messages.push({ thread_id: longThread, message_id: `reply-${i}`, run_id, role: "assistant", text: t.reply, created_at: at.replace(/:00Z$/, ":30Z") });
+  });
+  fs.writeFileSync(path.join(path.dirname(f.preload), "t3.json"), JSON.stringify(d));
+}
+const setPrompt = (f, text) => fs.writeFileSync(f.prompt, text);
+const entry = (n, turn, outcome, pending, text) => `## Message ${n} · turn ${turn} · ${outcome} · ${pending ? "PENDING" : "done"}\n\n${text}\n`;
+const DONE = "completed with VERDICT: DONE", NO_VERDICT = "completed without VERDICT: DONE";
+const messagesFiles = (f) => fs.readdirSync(f.jobDir).filter((n) => /^handoff-\d+-messages\.md$/.test(n));
+
+test("handoff messages: an interrupted successor's inherited fix stays PENDING through a chained hand-off (pointer, no nesting)", () => {
   const f = handoffHome(threeCompactions.slice(0, 3));
-  addFirst(f, task);
+  setTurns(f, [{ lead: S2_TASK, reply: "S2 built.\n\nVERDICT: DONE" }, { lead: "fix A: b.py drops the header", reply: "Half of A done; tests next." }]);
+  setPrompt(f, "fix B: c.py");
   ok(f.run());
   const [s] = f.sent("message.dispatch");
-  assert.ok(s.text.includes(`<<<ORIGINAL TASK\n${task}\nORIGINAL TASK>>>\n\n## This round\n\nfix finding 2`), s.text);
-  assert.ok(s.text.includes("Its last turn ended without `VERDICT: DONE`: its work is not finished"));
+  const file1 = path.join(f.jobDir, "handoff-2-messages.md");
+  const body1 = fs.readFileSync(file1, "utf8");
+  assert.ok(body1.startsWith(`# Lead messages to thread ${longThread}\n\n`), body1);
+  assert.ok(body1.endsWith(`${entry(1, 1, DONE, false, `(the original task: ${IN_BRIEF})`)}\n${entry(2, 2, NO_VERDICT, true, "fix A: b.py drops the header")}`), body1);
+  assert.ok(s.text.includes(`Every message its lead sent it is in ${file1}, oldest first, each headed with how its turn ended. Do every message marked PENDING there, in order (message 2 of 2: those after its last \`VERDICT: DONE\` turn)`), s.text);
+  assert.ok(s.text.includes(`<<<ORIGINAL TASK\n${S2_TASK}\nORIGINAL TASK>>>\n\nEARLIER LEAD MESSAGES: ${file1}\n\n## This round\n\nfix B: c.py`), s.text);
+  // The successor's only turn is interrupted before it finishes A or B; the lead's next round hands it off.
   const g = handoffHome(threeCompactions.slice(0, 3));
-  addFirst(g, s.text);
-  fs.writeFileSync(g.prompt, "fix finding 3");
+  setTurns(g, [{ lead: s.text, status: "interrupted" }]);
+  setPrompt(g, "fix C: d.py");
+  ok(g.run());
+  const [t] = g.sent("message.dispatch");
+  const file2 = path.join(g.jobDir, "handoff-2-messages.md");
+  const body2 = fs.readFileSync(file2, "utf8");
+  assert.ok(body2.includes(`## Message 1 · turn 1 · did not finish (interrupted) · PENDING\n\n(a hand-off brief) Earlier lead messages: ${file1}. Its PENDING messages were handed on with this brief: they are still pending unless this message's turn ended \`VERDICT: DONE\`.\n\nGiven with it:\n\nfix B: c.py`), body2);
+  assert.ok(!body2.includes("fix A"), "the earlier fix stays in its own file, not nested");
+  assert.ok(fs.readFileSync(file1, "utf8").includes(entry(2, 2, NO_VERDICT, true, "fix A: b.py drops the header")), "the pointed-to file still holds fix A as PENDING");
+  assert.equal(t.text.split("<<<ORIGINAL TASK").length, 2, t.text);
+  assert.equal(t.text.split("You take over from").length, 2, t.text);
+  assert.ok(t.text.includes(`<<<ORIGINAL TASK\n${S2_TASK}\nORIGINAL TASK>>>\n\nEARLIER LEAD MESSAGES: ${file2}\n\n## This round\n\nfix C: d.py`), t.text);
+  assert.ok(t.text.includes("Its last turn did not finish (interrupted): its work is not finished"), t.text);
+  assert.ok(t.text.includes("(message 1 of 1: those after its last `VERDICT: DONE` turn)"), t.text);
+  assert.equal(g.read("rounds"), "", "a worker has no rounds");
+});
+
+test("handoff messages: CONTINUE resending the original brief keeps the pending fix; the task appears once", () => {
+  const f = handoffHome(threeCompactions.slice(0, 3));
+  setTurns(f, [{ lead: asSent(S2_TASK), reply: "Most of S2." }, { lead: "fix A: b.py", reply: "A in progress." }]);
+  setPrompt(f, S2_TASK);
+  ok(f.run());
+  const [s] = f.sent("message.dispatch");
+  const body = f.read("handoff-2-messages.md");
+  assert.ok(body.endsWith(`${entry(1, 1, NO_VERDICT, true, `(the original task: ${IN_BRIEF})`)}\n${entry(2, 2, NO_VERDICT, true, "fix A: b.py")}`), body);
+  assert.equal(s.text.split(S2_TASK).length, 2, "the original task once");
+  assert.ok(s.text.endsWith("## This round\n\nThe lead sent the original brief again (above, between the ORIGINAL TASK markers): finish it, after the PENDING messages."), s.text);
+  assert.ok(s.text.includes("(messages 1, 2 of 2"), s.text);
+});
+
+test("handoff messages: the launcher's own nudges are left out; the fix before them stays PENDING", () => {
+  assert.equal(NUDGES.length, 3);
+  assert.ok(WORKER_VERDICT_NUDGE_TEXT.startsWith(WORKER_NUDGE_TEXT.replace(/\. Don't end the turn waiting\.$/, "")));
+  const f = handoffHome(threeCompactions.slice(0, 3));
+  setTurns(f, [{ lead: S2_TASK, reply: "S2 built.\n\nVERDICT: DONE" }, { lead: "fix A: b.py", reply: "Tests running in the background." },
+    { lead: WORKER_VERDICT_NUDGE_TEXT, reply: "Still on it." }]);
+  setPrompt(f, "fix B");
+  ok(f.run());
+  const body = f.read("handoff-2-messages.md");
+  assert.ok(!body.includes("Your last turn ended"), body);
+  // fix A's turn is the last run before the next lead message: the nudge's run, no verdict.
+  assert.ok(body.endsWith(entry(2, 3, NO_VERDICT, true, "fix A: b.py")), body);
+  // Another order: nudges between and after lead messages, and a turn with no lead message and no reply.
+  const g = handoffHome(threeCompactions.slice(0, 3));
+  setTurns(g, [{ lead: S2_TASK, reply: "Waiting on pytest." }, { lead: VERDICT_NUDGE_TEXT, reply: "Partial." }, { lead: "fix A: b.py", reply: "Review incomplete." },
+    { lead: `${WORKER_NUDGE_TEXT}\n`, reply: "Fixed A.\n\nVERDICT: DONE" }, {}, { lead: WORKER_VERDICT_NUDGE_TEXT, status: "failed" }]);
+  setPrompt(g, "fix B");
+  ok(g.run());
+  const gb = g.read("handoff-2-messages.md");
+  for (const n of NUDGES) assert.ok(!gb.includes(n.trim()), `nudge left in: ${n.slice(0, 40)}`);
+  // fix A's segment is runs 3-6; the failed nudge run 6 is the last word: not finished.
+  assert.ok(gb.endsWith(`${entry(1, 2, NO_VERDICT, true, `(the original task: ${IN_BRIEF})`)}\n${entry(2, 6, "did not finish (failed)", true, "fix A: b.py")}`), gb);
+});
+
+test("handoff messages: a VERDICT: DONE turn then a new round: only the new round is PENDING", () => {
+  const f = handoffHome(threeCompactions.slice(0, 3));
+  setTurns(f, [{ lead: S2_TASK, reply: "S2 built.\n\nVERDICT: DONE" }, { lead: "fix A", reply: "A fixed.\n\nVERDICT: DONE" }, { lead: "fix B", reply: "Working on B." }]);
+  setPrompt(f, "fix C");
+  ok(f.run());
+  const body = f.read("handoff-2-messages.md");
+  assert.ok(body.endsWith(`${entry(1, 1, DONE, false, `(the original task: ${IN_BRIEF})`)}\n${entry(2, 2, DONE, false, "fix A")}\n${entry(3, 3, NO_VERDICT, true, "fix B")}`), body);
+  const [s] = f.sent("message.dispatch");
+  assert.ok(s.text.includes("(message 3 of 3: those after its last `VERDICT: DONE` turn)"), s.text);
+  // All done: nothing pending, the successor is told not to redo them.
+  const d = handoffHome(threeCompactions.slice(0, 3));
+  setTurns(d, [{ lead: S2_TASK, reply: "Half." }, { lead: "fix A", reply: "A fixed.\n\nVERDICT: DONE" }]);
+  ok(d.run());
+  assert.ok(!d.read("handoff-2-messages.md").includes("PENDING\n"), d.read("handoff-2-messages.md"));
+  assert.ok(d.sent("message.dispatch")[0].text.includes("oldest first: all are done (its last turn ended `VERDICT: DONE`), so don't redo them. Then do this round."));
+  assert.ok(d.sent("message.dispatch")[0].text.includes("Its last turn completed with `VERDICT: DONE`.\n\n"));
+});
+
+test("handoff messages: several wordings and orders (limit resumes, a lead's own \"continue\", a resent brief, a never-started message)", () => {
+  const f = handoffHome(threeCompactions.slice(0, 3));
+  setTurns(f, [{ lead: S2_TASK, reply: "Built.\n\nVERDICT: DONE" }, { lead: "Please also fix the README.", status: "failed" },
+    { lead: "Continue where you left off.", id: `limit-resume:${longThread}:2`, reply: "README half done." }, { lead: "continue", reply: "Hit a snag.\n\nVERDICT: BLOCKED" },
+    { lead: S2_TASK, reply: "Rechecking." }, { lead: "Also run ruff.", runless: true }]);
+  setPrompt(f, "fix Z");
+  ok(f.run());
+  const body = f.read("handoff-2-messages.md");
+  assert.ok(!body.includes("Continue where you left off"), "a limit resume is T3's, not the lead's");
+  assert.ok(body.endsWith([entry(1, 1, DONE, false, `(the original task: ${IN_BRIEF})`), entry(2, 3, NO_VERDICT, true, "Please also fix the README."),
+    entry(3, 4, NO_VERDICT, true, "continue"), entry(4, 5, NO_VERDICT, true, `(the lead resent the original brief: ${IN_BRIEF})`),
+    entry(5, "none", "not started", true, "Also run ruff.")].join("\n")), body);
+  assert.ok(f.sent("message.dispatch")[0].text.includes("(messages 2, 3, 4, 5 of 5"));
+  // No VERDICT: DONE anywhere: every message is pending, the first included.
+  const g = handoffHome(threeCompactions.slice(0, 3));
+  setTurns(g, [{ lead: S2_TASK, status: "interrupted" }, { lead: "fix A", reply: "VERDICT: DONE is what I'd write if done; not yet." }]);
+  ok(g.run());
+  assert.ok(g.read("handoff-2-messages.md").endsWith(`${entry(1, 1, "did not finish (interrupted)", true, `(the original task: ${IN_BRIEF})`)}\n${entry(2, 2, NO_VERDICT, true, "fix A")}`));
+});
+
+test("handoff messages: an old-format successor brief (ORIGINAL TASK + LAST ROUND) keeps its rounds; the task once", () => {
+  const legacy = `You take over from thread 0000; its last report is /x/report.md.\n\nIts edits are uncommitted in the tree: read \`git status\` and \`git diff\` for its files first and keep what it finished. Its last turn ended without \`VERDICT: DONE\`: its work is not finished.\n\nIts original task, for owned files, rules and Verify commands:\n\n<<<ORIGINAL TASK\n${S2_TASK}\nORIGINAL TASK>>>\n\n## Its last round\n\n<<<LAST ROUND\nfix finding 2\nLAST ROUND>>>\n\n## This round\n\nfix finding 3`;
+  const f = handoffHome(threeCompactions.slice(0, 3));
+  setTurns(f, [{ lead: legacy, reply: "Finding 2 done, 3 next." }]);
+  setPrompt(f, "fix finding 4");
+  ok(f.run());
+  const [s] = f.sent("message.dispatch");
+  assert.equal(s.text.split("<<<ORIGINAL TASK").length, 2, s.text);
+  assert.equal(s.text.split("You take over from").length, 2, s.text);
+  assert.ok(!s.text.includes("LAST ROUND"), s.text);
+  const body = f.read("handoff-2-messages.md");
+  assert.ok(body.includes(`## Message 1 · turn 1 · ${NO_VERDICT} · PENDING\n\nYou take over from thread 0000;`), body);
+  assert.ok(body.includes(`(the original task: ${IN_BRIEF})\n\n## Its last round\n\n<<<LAST ROUND\nfix finding 2\nLAST ROUND>>>\n\n## This round\n\nfix finding 3\n`), body);
+  assert.equal(body.split(S2_TASK).length, 1, "the task isn't in the file");
+});
+
+// Plan 1120 S3 r1 F1: a generated hand-off brief is known by its whole layout (TAKEOVER line, the task
+// between the markers, the EARLIER line right after them), never by one line. A lead message that
+// only holds such a line, or quotes another task block, keeps all its text.
+test("handoff messages: a lead message that only holds an EARLIER LEAD MESSAGES line keeps all its text (r1 F1 review probe)", () => {
+  const lead = "Fix the cache first.\n\nEARLIER LEAD MESSAGES: /tmp/old.md\n\nThen run tests.";
+  const f = handoffHome(threeCompactions.slice(0, 3));
+  setTurns(f, [{ lead: S2_TASK, reply: "done\nVERDICT: DONE" }, { lead, reply: "working" }]);
+  ok(f.run());
+  const body = f.read("handoff-2-messages.md");
+  assert.ok(body.includes("Fix the cache first."), body);
+  assert.ok(body.endsWith(entry(2, 2, NO_VERDICT, true, lead)), body);
+  assert.ok(!body.includes("(a hand-off brief)"), body);
+});
+
+test("handoff messages: other wordings that only look launcher-written keep all their text (r1 F1 sweep)", () => {
+  const leads = [
+    // the EARLIER line first, with a "## This round" heading after it
+    "EARLIER LEAD MESSAGES: /tmp/old.md\n\n## This round\n\nfix D: e.py",
+    // the lead's own takeover note: the TAKEOVER line and an EARLIER line, no task block
+    "You take over from thread abc; see /tmp/x.md.\n\nEARLIER LEAD MESSAGES: /tmp/old.md\n\n## This round\n\nfix E: f.py",
+    // another stage's brief quoted between the markers: not this task, kept
+    "Compare with this older brief:\n\n<<<ORIGINAL TASK\nImplement S1: own b.py.\nORIGINAL TASK>>>\n\nthen fix F: g.py",
+  ];
+  const f = handoffHome(threeCompactions.slice(0, 3));
+  setTurns(f, [{ lead: S2_TASK, reply: "Built.\n\nVERDICT: DONE" }, ...leads.map((lead) => ({ lead, reply: "on it" }))]);
+  ok(f.run());
+  const body = f.read("handoff-2-messages.md");
+  assert.ok(body.endsWith(leads.map((lead, i) => entry(i + 2, i + 2, NO_VERDICT, true, lead)).join("\n")), body);
+  // A takeover brief with the lead's text between the task block and an EARLIER line isn't the
+  // launcher's layout: only the block holding this task is taken out, every other line stays.
+  const g = handoffHome(threeCompactions.slice(0, 3));
+  const mixed = `You take over from thread abc; its last report is /x/report.md.\n\n<<<ORIGINAL TASK\n${S2_TASK}\nORIGINAL TASK>>>\n\nAlso fix G.\n\nEARLIER LEAD MESSAGES: /tmp/old.md\n\nfix H`;
+  setTurns(g, [{ lead: mixed, reply: "half" }]);
+  ok(g.run());
+  assert.ok(g.read("handoff-2-messages.md").endsWith(entry(1, 1, NO_VERDICT, true,
+    `You take over from thread abc; its last report is /x/report.md.\n\n(the original task: ${IN_BRIEF})\n\nAlso fix G.\n\nEARLIER LEAD MESSAGES: /tmp/old.md\n\nfix H`)), g.read("handoff-2-messages.md"));
+  assert.equal(g.sent("message.dispatch")[0].text.split(S2_TASK).length, 2, "the task once");
+});
+
+test("handoff messages: a first message that quotes a task block is the task whole, through a chained hand-off (r1 F1 sweep)", () => {
+  const task = "Do S3: own c.py. The S1 brief, for reference:\n\n<<<ORIGINAL TASK\nImplement S1: own b.py.\nORIGINAL TASK>>>\n\nVerify: pytest c.";
+  const f = handoffHome(threeCompactions.slice(0, 3));
+  setTurns(f, [{ lead: task, reply: "Half of S3." }]);
+  setPrompt(f, "fix A");
+  ok(f.run());
+  const [s] = f.sent("message.dispatch");
+  assert.ok(s.text.includes(`<<<ORIGINAL TASK\n${task}\nORIGINAL TASK>>>\n\nEARLIER LEAD MESSAGES: `), s.text);
+  assert.ok(f.read("handoff-2-messages.md").endsWith(entry(1, 1, NO_VERDICT, true, `(the original task: ${IN_BRIEF})`)), f.read("handoff-2-messages.md"));
+  const g = handoffHome(threeCompactions.slice(0, 3));
+  setTurns(g, [{ lead: s.text, reply: "Still half." }]);
+  setPrompt(g, "fix B");
+  ok(g.run());
+  const [t] = g.sent("message.dispatch");
+  assert.ok(t.text.includes(`<<<ORIGINAL TASK\n${task}\nORIGINAL TASK>>>\n\nEARLIER LEAD MESSAGES: ${path.join(g.jobDir, "handoff-2-messages.md")}\n\n## This round\n\nfix B`), t.text);
+  assert.ok(g.read("handoff-2-messages.md").includes("(a hand-off brief) Earlier lead messages: "), g.read("handoff-2-messages.md"));
+});
+
+test("handoff messages: a successor brief behind T3's delegate_task line is still a hand-off brief; that line is kept (r1 F1 sweep)", () => {
+  const f = handoffHome(threeCompactions.slice(0, 3));
+  setTurns(f, [{ lead: S2_TASK, reply: "Half." }]);
+  setPrompt(f, "fix A");
+  ok(f.run());
+  const [s] = f.sent("message.dispatch");
+  const file1 = path.join(f.jobDir, "handoff-2-messages.md");
+  const g = handoffHome(threeCompactions.slice(0, 3));
+  setTurns(g, [{ lead: `Act as the implementation sub-agent for this task.\n\n${s.text}`, reply: "Still half." }]);
+  setPrompt(g, "fix B");
   ok(g.run());
   const [t] = g.sent("message.dispatch");
   assert.equal(t.text.split("<<<ORIGINAL TASK").length, 2, t.text);
-  assert.equal(t.text.split("You take over from").length, 2, t.text);
-  assert.ok(t.text.includes(`<<<ORIGINAL TASK\n${task}\nORIGINAL TASK>>>\n\n## Its last round\n\n<<<LAST ROUND\nfix finding 2`), t.text);
-  assert.ok(t.text.includes("LAST ROUND>>>\n\n## This round\n\nfix finding 3"), t.text);
+  assert.ok(t.text.includes(`<<<ORIGINAL TASK\n${S2_TASK}\nORIGINAL TASK>>>`), t.text);
+  // The round as sent (with the worker appendix the launcher adds) follows "Given with it".
+  assert.ok(g.read("handoff-2-messages.md").includes(`## Message 1 · turn 1 · ${NO_VERDICT} · PENDING\n\nAct as the implementation sub-agent for this task.\n\n(a hand-off brief) Earlier lead messages: ${file1}. Its PENDING messages were handed on with this brief: they are still pending unless this message's turn ended \`VERDICT: DONE\`.\n\nGiven with it:\n\nfix A\n`), g.read("handoff-2-messages.md"));
+  assert.ok(!g.read("handoff-2-messages.md").includes("You take over from"), "no nesting");
+});
+
+// Plan 1120 S3 r2 F1: the outer task block is matched with nesting (only whole marker lines count; it
+// ends where the depth returns to 0) and the EARLIER line counts only right after it. A task, round or
+// findings that quote an earlier generated brief stay whole at every hop; unbalanced markers, or a
+// lead's own words before the takeover line, mean the message is not a generated brief: kept whole.
+const wrapped = (task) => `<<<ORIGINAL TASK\n${task}\nORIGINAL TASK>>>`;
+// One CONTINUE hand-off of a thread whose only lead message is `lead`: what the successor was sent,
+// its messages file and that file's path.
+function continueHop(lead, round) {
+  const f = handoffHome(threeCompactions.slice(0, 3));
+  setTurns(f, [{ lead, reply: "partial" }]);
+  setPrompt(f, round);
+  // A round quoting a brief asks for a verdict (its text names `VERDICT: DONE`): the successor gives one.
+  fs.appendFileSync(f.preload, `\nglobalThis.fakeT3Outcome = (t) => ({ reply: "reply on " + t.thread_id + "\\n\\nVERDICT: DONE" });\n`);
+  ok(f.run());
+  return { text: f.sent("message.dispatch")[0].text, body: f.read("handoff-2-messages.md"), file: path.join(f.jobDir, "handoff-2-messages.md") };
+}
+// Hops from a raw task: at each one the successor holds the task block once and whole, the EARLIER
+// line right after it names this hop's messages file and the round follows; message 1 lost nothing (the
+// task at hop 1, then a pointer to the previous hop's file with that hop's round).
+function chainHops(lead, rounds) {
+  const task = lead.trim();
+  let prev = null;
+  return rounds.map((round, i) => {
+    const hop = continueHop(lead, round);
+    const block = `${wrapped(task)}\n\nEARLIER LEAD MESSAGES: ${hop.file}\n\n## This round\n\n${round}`;
+    assert.equal(hop.text.split(block).length, 2, `hop ${i + 1}: the task block once, then this hop's file:\n${hop.text}`);
+    assert.equal(hop.text.indexOf("You take over from"), 0, `hop ${i + 1}: one takeover, at the top:\n${hop.text}`);
+    if (i === 0) assert.ok(hop.body.endsWith(entry(1, 1, NO_VERDICT, true, `(the original task: ${IN_BRIEF})`)), hop.body);
+    else assert.ok(hop.body.includes(`## Message 1 · turn 1 · ${NO_VERDICT} · PENDING\n\n(a hand-off brief) Earlier lead messages: ${prev.file}. Its PENDING messages were handed on with this brief: they are still pending unless this message's turn ended \`VERDICT: DONE\`.\n\nGiven with it:\n\n${rounds[i - 1]}\n`), `hop ${i + 1}:\n${hop.body}`);
+    prev = hop; lead = hop.text;
+    return hop;
+  });
+}
+
+test("recheck probe: quoted earlier handoff inside task survives two hops", () => {
+  const task = "Implement the new parser.\n\nReference handoff:\n<<<ORIGINAL TASK\nOld task\nORIGINAL TASK>>>\n\nEARLIER LEAD MESSAGES: /tmp/earlier.md\n\nNow fix the parser and run tests.";
+  const f = handoffHome(threeCompactions.slice(0,3)); setTurns(f,[{lead:task,reply:"partial"}]); setPrompt(f,"fix A"); ok(f.run());
+  const sent=f.sent("message.dispatch")[0].text;
+  const g=handoffHome(threeCompactions.slice(0,3)); setTurns(g,[{lead:sent,reply:"partial"}]); setPrompt(g,"fix B"); ok(g.run());
+  const next=g.sent("message.dispatch")[0].text;
+  assert.ok(next.includes(`<<<ORIGINAL TASK\n${task}\nORIGINAL TASK>>>`),next);
+});
+
+test("handoff messages: the recheck probe's task, three hops: whole, once, this hop's EARLIER file (r2 F1)", () => {
+  chainHops("Implement the new parser.\n\nReference handoff:\n<<<ORIGINAL TASK\nOld task\nORIGINAL TASK>>>\n\nEARLIER LEAD MESSAGES: /tmp/earlier.md\n\nNow fix the parser and run tests.", ["fix A", "fix B", "fix C"]);
+});
+
+test("handoff messages: a task quoting a full earlier generated brief (its EARLIER line too), three hops (r2 F1)", () => {
+  const old = continueHop(S2_TASK, "fix the old stage").text;
+  assert.ok(old.includes(`${wrapped(S2_TASK)}\n\nEARLIER LEAD MESSAGES: `), old);
+  chainHops(`Do S4: own d.py. The S2 hand-off, for reference:\n\n${old}\n\nVerify: pytest d.`, ["fix A", "fix B", "fix C"]);
+});
+
+test("handoff messages: a task quoting two generated briefs, three hops (r2 F1)", () => {
+  const a = continueHop(S2_TASK, "fix the S2 stage").text, b = continueHop("Implement S3: own c.py.", "fix the S3 stage").text;
+  chainHops(`Merge what these two hand-offs left:\n\n${a}\n\nand\n\n${b}\n\nThen run all tests.`, ["fix A", "fix B", "fix C"]);
+});
+
+test("handoff messages: a round after the EARLIER line that quotes a brief stays whole; the task stays this one (r2 F1)", () => {
+  const quoted = continueHop("Implement S1: own b.py.", "fix the S1 stage").text;
+  const round = `Fix F1: the header. The S1 hand-off, for comparison:\n\n${quoted}\n\nKeep its format.`;
+  const [, second] = chainHops(S2_TASK, [round, "fix C"]);
+  assert.ok(!second.text.includes("Implement S1"), "the quoted brief goes in the messages file, not the task");
+  assert.ok(second.body.includes(`Given with it:\n\n${round}\n`), second.body);
+});
+
+test("handoff messages: unbalanced markers in a task: never a generated brief, the text kept whole (r2 F1)", () => {
+  for (const stray of ["ORIGINAL TASK>>>", "<<<ORIGINAL TASK"]) {
+    const task = `Implement S5: own e.py. A marker line on its own, as written:\n${stray}\n\nVerify: pytest e.`;
+    const first = continueHop(task, "fix A");
+    assert.ok(first.text.includes(`${wrapped(task)}\n\nEARLIER LEAD MESSAGES: ${first.file}\n\n## This round\n\nfix A`), first.text);
+    assert.ok(first.body.endsWith(entry(1, 1, NO_VERDICT, true, `(the original task: ${IN_BRIEF})`)), first.body);
+    // That brief's markers don't balance, so the next hop takes it whole as the task: nothing cut.
+    const second = continueHop(first.text, "fix B");
+    assert.ok(second.text.includes(`${wrapped(first.text.trim())}\n\nEARLIER LEAD MESSAGES: ${second.file}\n\n## This round\n\nfix B`), second.text);
+    assert.ok(second.body.endsWith(entry(1, 1, NO_VERDICT, true, `(the original task: ${IN_BRIEF})`)), second.body);
+  }
+  // A brief's own task block balanced but a stray close line after the EARLIER line: kept whole too.
+  const f = continueHop(S2_TASK, "fix A");
+  const lead = `${f.text}\n\nORIGINAL TASK>>>`;
+  const g = continueHop(lead, "fix B");
+  assert.ok(g.text.includes(wrapped(lead.trim())), g.text);
+});
+
+test("handoff messages: a lead's own words before a generated brief: the message kept whole, nested once, not again (r2 F1)", () => {
+  const brief = continueHop(S2_TASK, "fix A").text;
+  const lead = `Lead note: work in the worktree.\n\n${brief}`;
+  const [, third] = chainHops(lead, ["fix B", "fix C"]);
+  assert.equal(third.text.split("<<<ORIGINAL TASK").length, 3, `the lead's message once, with the brief it holds:\n${third.text}`);
+});
+
+test("handoff messages: a brief from before S3 whose task quotes a block: the task whole, only its outer block replaced; unbalanced markers kept whole (r2 F1)", () => {
+  const task = "Do S3: own c.py. The S1 brief, for reference:\n\n<<<ORIGINAL TASK\nImplement S1: own b.py.\nORIGINAL TASK>>>\n\nVerify: pytest c.";
+  const old = `You take over from thread abc; its last report is /x/report.md.\n\nIts original task:\n\n${wrapped(task)}\n\nLAST ROUND\n\nfix the header`;
+  const unbalanced = `Again, as sent:\n\n${wrapped(task)}\nORIGINAL TASK>>>\n\nthen fix G.`;
+  const f = handoffHome(threeCompactions.slice(0, 3));
+  setTurns(f, [{ lead: old, reply: "half" }, { lead: unbalanced, reply: "still half" }]);
+  setPrompt(f, "fix H");
+  ok(f.run());
+  const text = f.sent("message.dispatch")[0].text, body = f.read("handoff-2-messages.md");
+  assert.equal(text.split(`${wrapped(task)}\n\nEARLIER LEAD MESSAGES: ${path.join(f.jobDir, "handoff-2-messages.md")}\n\n## This round\n\nfix H`).length, 2, text);
+  assert.ok(body.endsWith(entry(1, 1, NO_VERDICT, true, `You take over from thread abc; its last report is /x/report.md.\n\nIts original task:\n\n(the original task: ${IN_BRIEF})\n\nLAST ROUND\n\nfix the header`)
+    + "\n" + entry(2, 2, NO_VERDICT, true, unbalanced)), body);
+});
+
+// Plan 1120 S3 r1 F2: without the old thread's lead messages a hand-off would start a successor with
+// only the new round. A failed read, none, or an empty first one: nothing saved, settled, written or
+// started; exit 1 (exit_code 1), as a refused settle.
+const failMessagesRead = `\nimport child from 'node:child_process'; import {syncBuiltinESMExports} from 'node:module';\nconst baseExec=child.execFileSync; child.execFileSync=function(cmd,args,...rest){if(args?.[3]?.includes('select message_id, run_id, created_at, payload_json')) throw new Error('simulated read failure'); return baseExec.call(this,cmd,args,...rest)}; syncBuiltinESMExports();\n`;
+function assertNoHandoff(f, r, why) {
+  assert.equal(r.status, 1, r.stderr);
+  assert.ok(r.stderr.includes(`handoff: lead messages of ${longThread}: ${why}; nothing settled or started.`), r.stderr);
+  assert.ok(f.read("run.log").includes(`handoff: lead messages of ${longThread}: ${why}`), f.read("run.log"));
+  assert.equal(f.sent("message.dispatch").length, 0, JSON.stringify(f.sent("message.dispatch").map((x) => x.text)));
+  assert.equal(f.sent("thread.create").length, 0);
+  assert.equal(f.sent("thread.settle").length, 0, "the old thread isn't settled");
+  assert.deepEqual(fs.readdirSync(f.jobDir).filter((n) => /^handoff-/.test(n)), []);
+  assert.equal(f.read("exit_code"), "1\n");
+  assert.equal(f.read("report.md"), "old report", "nothing saved over the report");
+  assert.equal(f.read("thread_id"), longThread);
+}
+test("handoff: a failed lead-message read stops the hand-off before anything changes; exit 1 (r1 F2 review probe)", () => {
+  const f = handoffHome(threeCompactions.slice(0, 3));
+  setTurns(f, [{ lead: S2_TASK, reply: "working" }, { lead: "fix lost work", reply: "partial" }]);
+  fs.appendFileSync(f.preload, failMessagesRead);
+  const r = f.run();
+  assertNoHandoff(f, r, "couldn't read them (simulated read failure)");
+});
+
+test("handoff: no lead message, or an empty first one, stops the hand-off too (r1 F2)", () => {
+  const f = handoffHome(threeCompactions); // the old thread has a reply and no lead message
+  assertNoHandoff(f, f.run(), "it has none");
+  const g = handoffHome(threeCompactions.slice(0, 3));
+  setTurns(g, [{ lead: "  \n", reply: "?" }, { lead: "fix A", reply: "partial" }]);
+  assertNoHandoff(g, g.run(), "its first message is empty");
+  // A reviewer's hand-off reads no lead messages, so it still goes ahead.
+  const h = handoffHome(threeCompactions);
+  fs.appendFileSync(h.preload, `\nglobalThis.fakeT3Outcome = () => ({ reply: "F1 fixed.\\n\\nVERDICT: APPROVE" });\n`);
+  setPrompt(h, "RECHECK ONLY. F1 only");
+  ok(h.run());
+  assert.equal(h.sent("message.dispatch").length, 1);
+  assert.notEqual(h.sent("message.dispatch")[0].threadId, longThread);
+});
+
+test("handoff: a worker's successor is told its last turn's state; only VERDICT: DONE is finished (final F1)", () => {
+  // A completed turn ending VERDICT: DONE is the only "finished".
   const d = handoffHome(threeCompactions.slice(0, 3));
-  addFirst(d, task);
-  const db = d.db(); db.messages.find((m) => m.message_id === "old-reply").text = "F1 fixed.\n\nVERDICT: DONE"; fs.writeFileSync(path.join(home(d), "t3.json"), JSON.stringify(db));
+  setTurns(d, [{ lead: S2_TASK, reply: "F1 fixed.\n\nVERDICT: DONE" }]);
   ok(d.run());
-  assert.ok(d.sent("message.dispatch")[0].text.includes("Its last turn completed with `VERDICT: DONE`"));
+  assert.ok(d.sent("message.dispatch")[0].text.includes("Its last turn completed with `VERDICT: DONE`."));
   // A reply that only mentions the verdict mid-line isn't finished (final r3 F1).
   const no = handoffHome(threeCompactions.slice(0, 3));
-  addFirst(no, task);
-  const nodb = no.db(); nodb.messages.find((m) => m.message_id === "old-reply").text = "Retry still fails. I cannot give VERDICT: DONE"; fs.writeFileSync(path.join(home(no), "t3.json"), JSON.stringify(nodb));
+  setTurns(no, [{ lead: S2_TASK, reply: "Retry still fails. I cannot give VERDICT: DONE" }]);
   ok(no.run());
   assert.ok(no.sent("message.dispatch")[0].text.includes("Its last turn ended without `VERDICT: DONE`: its work is not finished"));
-  // The lead resends the exact original brief: no task copy, but the unfinished-turn warning stays (final r3 F1).
-  const same = handoffHome(threeCompactions.slice(0, 3));
-  const sent = s.text.split("## This round\n\n")[1];
-  addFirst(same, sent);
-  ok(same.run());
-  const st = same.sent("message.dispatch")[0].text;
-  assert.ok(!st.includes("<<<ORIGINAL TASK"), st);
-  assert.ok(st.includes("Its last turn ended without `VERDICT: DONE`: its work is not finished"), st);
-  assert.ok(st.endsWith(sent), st);
+  assert.ok(no.read("handoff-2-messages.md").includes(`· ${NO_VERDICT} · PENDING`));
 });
 
 test("handoff: HANDOFF_COMPACTIONS doesn't turn a reviewer into a worker (final F5)", () => {
@@ -690,6 +1043,7 @@ test("handoff: a timed-out handoff replaces a stale exit_code with 124", () => {
 
 test("handoff: the old thread's last reply is saved as report.md before the new thread starts", () => {
   const f = handoffHome(threeCompactions);
+  setTurns(f, [{ lead: "Implement S2: own a.py.", reply: `reply on ${longThread}` }]);
   ok(f.run());
   assert.deepEqual(f.db().reportAtStart, [`reply on ${longThread}`]);
 });
@@ -697,13 +1051,17 @@ test("handoff: the old thread's last reply is saved as report.md before the new 
 test("handoff: a quota retry keeps the takeover message; no TITLE keeps the old title", () => {
   const f = handoffHome(threeCompactions);
   f.oldThread({ title: "[gemini-flash] Look up the docs", model_selection_json: JSON.stringify({ instanceId: "antigravity", model: "gemini-3.8-flash-high" }) });
+  setTurns(f, [{ lead: "Look up the docs for X.", reply: "Half." }]);
   ok(f.run({ FAKE_QUOTA: "1", PLAN: "/p/plan.md", TITLE: "" }));
+  const files = fs.readdirSync(f.jobDir).filter((n) => /^handoff-\d+-messages\.md$/.test(n));
+  assert.deepEqual(files, ["handoff-3-messages.md"], "one messages file for one hand-off");
   const created = f.sent("thread.create");
   assert.deepEqual(created.map((c) => c.modelSelection.model), ["gemini-3.8-flash-high", "claude-haiku-5-5"]);
   assert.equal(created[0].title, "[gemini-flash] Look up the docs");
   const starts = f.sent("message.dispatch");
   assert.equal(starts.length, 2);
-  for (const s of starts) assert.ok(s.text.startsWith(`You take over from thread ${longThread};`) && s.text.includes("PLAN: /p/plan.md"), s.text);
+  for (const s of starts) assert.ok(s.text.startsWith(`You take over from thread ${longThread};`) && s.text.includes("PLAN: /p/plan.md")
+    && s.text.includes(`EARLIER LEAD MESSAGES: ${path.join(f.jobDir, files[0])}\n`), s.text);
   assert.equal(f.read("thread_ids_prev"), `${longThread}\n`, "the old thread is recorded once");
 });
 
@@ -715,6 +1073,7 @@ test("--compactions: v2 compaction items and pre-0.1.0 activity rows both count"
 
 test("handoff: 1 old compaction + 1 since 0.1.0 reach a worker's bar", () => {
   const f = handoffHome(threeCompactions.slice(0, 2), ["2026-10-17T00:39:39Z"]);
+  setTurns(f, [{ lead: "Implement S2: own a.py.", reply: `reply on ${longThread}` }]);
   ok(f.run());
   const [s] = f.sent("message.dispatch");
   assert.notEqual(s.threadId, longThread);
@@ -914,4 +1273,74 @@ test("review budget: a -review/-final JOB counts with any brief; a worker job do
   for (const job of ["x-final-sol", "x-s1-review", "x-s2-recheck1"]) { ok(f.review(job)); assert.equal(f.readJob(job, "rounds"), "1\n", job); }
   fs.writeFileSync(f.prompt, "fix finding 2");
   for (const job of ["x-s1-impl", "x-finalize"]) { ok(f.review(job)); assert.equal(f.readJob(job, "rounds"), "", job); }
+});
+
+// Provider-error turns (plan 1120 S3b, chk_335c542350db4fa8): a launch that ends failed with a
+// provider error and no reply gives its round back; 3 such turns stop the job. FAKE_PROVIDER_ERROR
+// fails every new turn (not /compact) with that message; FAKE_PROVIDER_REPLY also stores a reply first.
+const FLAGGED = "This content was flagged for possible cybersecurity risk. If this seems wrong, try rephrasing your request. Our usage policies apply to all requests; repeated flags on one conversation may end it early. Request id req_0123456789abcdef.";
+const providerPreload = `
+const base = globalThis.fakeT3Outcome;
+globalThis.fakeT3Outcome = (thread, command, db) => process.env.FAKE_PROVIDER_ERROR && command.text !== "/compact"
+  ? { error: { class: "provider_error", message: process.env.FAKE_PROVIDER_ERROR }, ...(process.env.FAKE_PROVIDER_REPLY ? { reply: process.env.FAKE_PROVIDER_REPLY } : {}) }
+  : base(thread, command, db);
+`;
+function providerHome() {
+  const f = reviewerHome();
+  fs.appendFileSync(f.preload, providerPreload);
+  fs.writeFileSync(f.prompt, "RECHECK ONLY. F1 open.");
+  return f;
+}
+const failedLine = (n) => `round ${n} not counted: provider error: ${FLAGGED.slice(0, 160)}`;
+
+test("review budget: a provider-error turn with no reply isn't a round", () => {
+  const f = providerHome();
+  const r = f.review("p1", { FAKE_PROVIDER_ERROR: FLAGGED });
+  assert.equal(r.status, 1, r.stderr);
+  assert.equal(f.sent("message.dispatch").length, 1, "the turn was sent");
+  assert.equal(fs.existsSync(path.join(f.jobs, "p1", "rounds")), false, "no rounds file before, none after");
+  const failed = f.readJob("p1", "rounds_failed").split("\n").filter(Boolean);
+  assert.equal(failed.length, 1, failed.join("\n"));
+  assert.ok(failed[0].endsWith(` ${longThread} ${failedLine(1)}`), failed[0]);
+  assert.ok(f.readJob("p1", "run.log").includes(failedLine(1)), f.readJob("p1", "run.log"));
+  assert.ok(r.stderr.includes(failedLine(1)), r.stderr);
+  // Case 2: the next launch completes and is round 1; rounds_failed stays as it was.
+  ok(f.review("p1"));
+  assert.equal(f.readJob("p1", "rounds"), "1\n");
+  assert.equal(f.readJob("p1", "rounds_failed").split("\n").filter(Boolean).length, 1);
+  // A counted round stays as it was ("1\n" stays "1\n").
+  assert.equal(f.review("p1", { FAKE_PROVIDER_ERROR: FLAGGED }).status, 1);
+  assert.equal(f.readJob("p1", "rounds"), "1\n");
+  assert.ok(f.readJob("p1", "rounds_failed").trim().split("\n")[1].endsWith(failedLine(2)), f.readJob("p1", "rounds_failed"));
+});
+
+test("review budget: a turn that replied and then failed still counts", () => {
+  const f = providerHome();
+  assert.notEqual(f.review("p1", { FAKE_PROVIDER_ERROR: FLAGGED, FAKE_PROVIDER_REPLY: "Half a review: F1 still open." }).status, 0);
+  assert.equal(f.readJob("p1", "rounds"), "1\n");
+  assert.equal(fs.existsSync(path.join(f.jobs, "p1", "rounds_failed")), false);
+  // A usage limit isn't a provider error: the go-around handles it, and nothing is written here.
+  const g = providerHome();
+  g.review("p1", { FAKE_PROVIDER_ERROR: "You've hit your usage limit. Resets 5pm." });
+  assert.equal(fs.existsSync(path.join(g.jobs, "p1", "rounds_failed")), false);
+});
+
+test("review budget: 3 provider-error turns refuse the 4th send with exit 3", () => {
+  const f = providerHome();
+  for (let n = 0; n < 3; n++) assert.equal(f.review("p1", { FAKE_PROVIDER_ERROR: FLAGGED }).status, 1);
+  assert.equal(fs.existsSync(path.join(f.jobs, "p1", "rounds")), false, "a job whose every round failed has no rounds file");
+  const before = f.sent("message.dispatch").length;
+  assert.equal(before, 3);
+  // rounds_failed alone keeps it a review (its brief needn't say so).
+  fs.writeFileSync(f.prompt, "Look again at F1.");
+  const r = f.review("p1");
+  const line = "3 provider-error turns on p1: start a fresh review (new JOB) or another model, or write closed.md";
+  assert.equal(r.status, 3, r.stderr);
+  assert.ok(r.stderr.includes(line), r.stderr);
+  assert.ok(f.readJob("p1", "run.log").includes(line));
+  assert.equal(f.sent("message.dispatch").length, before, "nothing sent");
+  assert.equal(f.readJob("p1", "exit_code"), "3\n");
+  // An uncapped Opus review stops the same way.
+  assert.equal(f.run({ JOB: "p1", REPORT_FILE: path.join(f.jobs, "p1", "report.md") }, ["opus", f.prompt]).status, 3);
+  assert.equal(f.sent("message.dispatch").length, before);
 });

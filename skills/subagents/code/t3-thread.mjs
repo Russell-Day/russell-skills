@@ -66,6 +66,14 @@ import { claude as claudeAccount, codexAccount as codexAccountByName, codexByIns
 import { agyOutUntil, noticeOnce, recordQuotaError } from "./agy-state.mjs";
 import { abandonThread, compactionCount as compactions, createMainThread, createThread, currentThread, getThread, interruptThread, mainModelSelection, orchestratorArgs, projectFor, renameThread, runReplies, sendMessage, settleThread, t3Query, workerThreadTitle } from "./t3-api.mjs";
 
+// The launcher's own nudges (see awaitAnswer), exact text: a hand-off's messages file leaves them out
+// (plan 1120 S3). `--nudges` prints them as JSON (the tests read them from here instead of retyping them).
+const VERDICT_NUDGE = "Your last turn ended without a verdict. Finish the review now: read the results of anything you started (or run the checks yourself in the foreground), then send the full packet ending in \"VERDICT: APPROVE\" or \"VERDICT: REVISE\". Don't end the turn waiting.";
+const workerNudge = (verdict) => "Your last turn ended on waiting, so whatever you were waiting for can't reach your lead. Check it now: read its output, or wait for it inside this turn (t3_background_wait on its task, or run it in the foreground with a fitting timeout), then send your full report"
+  + (verdict ? " ending in \"VERDICT: DONE\" or \"VERDICT: BLOCKED\"" : "") + ". Don't end the turn waiting.";
+const LAUNCHER_NUDGES = [VERDICT_NUDGE, workerNudge(false), workerNudge(true)];
+if (process.argv[2] === "--nudges") { console.log(JSON.stringify(LAUNCHER_NUDGES)); process.exit(0); }
+
 if (process.argv[2] === "--compactions") {
   const threadId = process.argv[3] ?? currentThread();
   if (!threadId) { console.error("not running in a T3 Claude or Codex thread; pass a thread id"); process.exit(2); }
@@ -200,14 +208,28 @@ log(`timeout ${timeoutMs / 60000} min (TIMEOUT=${process.env.TIMEOUT ?? "unset"}
 // CONTINUE) sends nothing, so it is gated only before a limit fallback's send.
 const REVIEW_JOB_RE = /(^|-)(review|recheck|final)(?=-|\d|$)/i;
 const isReview = /^\s*(REVIEW|RECHECK) ONLY\./.test(prompt) || REVIEW_JOB_RE.test(path.basename(job))
-  || fs.existsSync(path.join(job, "rounds"));
+  || fs.existsSync(path.join(job, "rounds")) || fs.existsSync(path.join(job, "rounds_failed"));
 const capped = model !== "opus";
 const maxRounds = Number(process.env.REVIEW_ROUNDS ?? 3);
 if (isReview && !Number.isFinite(maxRounds)) { console.error(`REVIEW_ROUNDS=${process.env.REVIEW_ROUNDS} is not a number`); process.exit(2); }
 let roundCounted = false;
+// The round this launch counted and `rounds` as it was before (null: no file), for a provider-error rollback.
+let countedRound = 0, roundsBefore = null;
 const nextRound = () => { try { return (Number.parseInt(fs.readFileSync(path.join(job, "rounds"), "utf8"), 10) || 0) + 1; } catch { return 1; } };
+const failedTurns = () => { try { return fs.readFileSync(path.join(job, "rounds_failed"), "utf8").split("\n").filter((l) => l.trim()).length; } catch { return 0; } };
+const PROVIDER_FAILS_MAX = 3;
 function budgetGate() {
-  if (!isReview || roundCounted || !capped) return;
+  if (!isReview || roundCounted) return;
+  // Provider-error turns aren't rounds (plan 1120 S3b), so a refusal loop could send forever: 3 stop it, on any model.
+  const failed = failedTurns();
+  if (failed >= PROVIDER_FAILS_MAX) {
+    const line = `${failed} provider-error turns on ${path.basename(job)}: start a fresh review (new JOB) or another model, or write closed.md`;
+    log(line);
+    console.error(line);
+    fs.writeFileSync(path.join(job, "exit_code"), "3\n");
+    process.exit(3);
+  }
+  if (!capped) return;
   const round = nextRound();
   if (round <= maxRounds) return;
   const line = `review budget: round ${round} > ${maxRounds} for ${path.basename(job)}; nothing sent. Fix what you agree with, then commit with every open id disputed (with evidence), stop and ask the user, or write closed.md (orchestrate §9). REVIEW_ROUNDS=5 only for an evidenced security, data-loss or concurrency blocker.`;
@@ -219,8 +241,11 @@ function budgetGate() {
 function budgetCount() {
   if (!isReview || roundCounted) return;
   const round = nextRound();
-  fs.writeFileSync(path.join(job, "rounds"), `${round}\n`);
+  const file = path.join(job, "rounds");
+  roundsBefore = fs.existsSync(file) ? fs.readFileSync(file, "utf8") : null;
+  fs.writeFileSync(file, `${round}\n`);
   roundCounted = true;
+  countedRound = round;
   log(`review round ${round}/${capped ? maxRounds : "uncapped"}`);
 }
 if (!(process.env.ATTACH && !process.env.CONTINUE)) budgetGate();
@@ -286,6 +311,24 @@ const limitRe = /usage limit|hit your (usage )?limit|usage_limit_reached|rate.?l
 // The job's own thread is settled at the end unless NO_SETTLE (a failure there is only logged:
 // the job's result stands).
 const settle = (threadId) => process.env.NO_SETTLE ? null : settleThread(threadId).catch((e) => log("settle", e.message));
+// A worker hand-off without the old thread's lead messages would start a successor with only the new
+// round: the task and every pending fix lost (plan 1120 S3 r1 F2). When they can't be read, or there
+// are none, the job ends here (exit_code 1, as a refused settle), before anything is saved or settled.
+// Returns them with `state`, how the old thread's latest turn ended (read in the same go).
+function handoffMessagesOrStop(threadId, snap) {
+  let msgs = null, why;
+  try { msgs = handoffMessages(threadId); if (msgs) msgs.state = turnState(snap, threadId); }
+  catch (e) { why = `couldn't read them (${e.message})`; }
+  if (!why && !msgs) why = "it has none";
+  else if (!why && !msgs.task) why = "its first message is empty";
+  if (!why) return msgs;
+  const line = `handoff: lead messages of ${threadId}: ${why}; nothing settled or started. Run the same command again, or start a fresh worker with its original task and this round`;
+  log(line);
+  console.error(line);
+  fs.writeFileSync(path.join(job, "exit_code"), "1\n");
+  console.log(job);
+  process.exit(1);
+}
 // A thread the job leaves for a replacement is always stopped and settled first; when that
 // fails the job ends here (exit_code 1), before anything replaces it.
 async function abandon(threadId, why) {
@@ -364,39 +407,143 @@ let handoff = null;
 const REVIEWERS = ["sol62", "sol61", "terra61", "astra"];
 
 // A worker's successor gets the task the stage started with once: its owned files, rules and
-// Verify commands, plus the round it was last given. A successor's own first message carries both
-// between these markers, so a later hand-off takes them out again instead of nesting the first takeover.
-const TASK_OPEN = "<<<ORIGINAL TASK", TASK_CLOSE = "ORIGINAL TASK>>>", ROUND_OPEN = "<<<LAST ROUND", ROUND_CLOSE = "LAST ROUND>>>";
+// Verify commands. A successor's own first message carries it between these markers, so a later
+// hand-off takes it out again instead of nesting the first takeover. LAST ROUND blocks are only in
+// briefs from the launcher before plan 1120 S3 (kept as they are in the messages file).
+const TASK_OPEN = "<<<ORIGINAL TASK", TASK_CLOSE = "ORIGINAL TASK>>>";
 const wrapTask = (text) => `${TASK_OPEN}\n${text.trim()}\n${TASK_CLOSE}`;
-const wrapRound = (text) => `${ROUND_OPEN}\n${text.trim()}\n${ROUND_CLOSE}`;
-function between(text, open, close) {
-  const i = text.indexOf(`${open}\n`), j = i < 0 ? -1 : text.indexOf(`\n${close}`, i);
-  return j < 0 ? null : text.slice(i + open.length + 1, j);
+// The outermost task blocks in text from offset `from` (a line start) on, matched with nesting
+// (plan 1120 S3 r2): only whole lines equal to a marker count, and a block ends where the depth
+// returns to 0, so a task that quotes an earlier brief (its blocks and EARLIER line too) stays whole.
+// Each block is { open, close, end }: where its open line starts, where its close line starts and the
+// offset just after the close line. null when the markers don't balance: a close with no open, or an
+// open never closed.
+function taskBlocks(text, from = 0) {
+  const blocks = [];
+  let depth = 0, open = -1;
+  for (let at = from; ; ) {
+    const nl = text.indexOf("\n", at), end = nl < 0 ? text.length : nl, line = text.slice(at, end);
+    if (line === TASK_OPEN && depth++ === 0) open = at;
+    else if (line === TASK_CLOSE) {
+      if (depth === 0) return null;
+      if (--depth === 0) blocks.push({ open, close: at, end });
+    }
+    if (nl < 0) break;
+    at = nl + 1;
+  }
+  return depth ? null : blocks;
 }
-const unwrapTask = (text) => between(text, TASK_OPEN, TASK_CLOSE) ?? text;
-// The round a thread was last given: a later lead message as it is; a successor's only message: what
-// follows its blocks (the lead's findings, or its "## This round"), else its LAST ROUND block.
-function lastRound(asks) {
-  if (asks.length > 1) return (asks.at(-1).text ?? "").trim();
-  const first = asks[0]?.text ?? "";
-  const end = Math.max(...[TASK_CLOSE, ROUND_CLOSE].map((c) => { const k = first.lastIndexOf(`\n${c}`); return k < 0 ? -1 : k + c.length + 1; }));
-  if (end < 0) return "";
-  return first.slice(end).replace(/^\s*## This round\s*/, "").trim() || (between(first, ROUND_OPEN, ROUND_CLOSE) ?? "").trim();
+const blockTask = (text, b) => text.slice(b.open + TASK_OPEN.length + 1, Math.max(b.open + TASK_OPEN.length + 1, b.close - 1));
+// A hand-off brief this launcher wrote, known by its whole layout, never by one line (plan 1120 S3
+// r1 F1, r2): the message opens with a line "You take over from …thread <id>" (only T3's
+// delegate_task line "Act as the … sub-agent for this task." may come before it), then the task
+// block, matched with nesting, and, since S3, the EARLIER line right after that block's close and
+// after no other. Returns that delegate line (kept in the entry), the task, the EARLIER file (null in
+// a brief from before S3) and what follows that line (the round, or the lead's findings). Anything
+// else is the lead's own text, kept whole: a task or note that quotes a brief, a lead's words before
+// the takeover line, unbalanced markers.
+const TAKEOVER_RE = /(?:^|\n)[ \t]*You take over from (?:worker )?thread \S+/;
+const DELEGATE_LINE_RE = /^Act as the [\w -]+ sub-agent for this task\.$/;
+const EARLIER_AFTER_RE = /^\n\nEARLIER LEAD MESSAGES: (\S+)[ \t]*(?:\n|$)/;
+function generatedBrief(text) {
+  const t = TAKEOVER_RE.exec(text);
+  if (!t) return null;
+  const from = t.index + (text[t.index] === "\n" ? 1 : 0), before = text.slice(0, from).trim();
+  if (before && !DELEGATE_LINE_RE.test(before)) return null;
+  const blocks = taskBlocks(text, from);
+  if (!blocks?.length) return null;
+  const earlierAfter = (b) => EARLIER_AFTER_RE.exec(text.slice(b.end));
+  const m = earlierAfter(blocks[0]);
+  // An EARLIER line after a later block but not after the first: the layout is not the launcher's.
+  if (!m && blocks.slice(1).some(earlierAfter)) return null;
+  const rest = text.slice(blocks[0].end);
+  return { before, task: blockTask(text, blocks[0]), earlier: m?.[1] ?? null, after: m ? rest.slice(m[0].length).replace(/^\s*## This round\s*/, "").trim() : null };
 }
-// Finished only when it says so (final F1): its latest turn completed and that turn's reply ends
-// `VERDICT: DONE` on a line of its own ("I cannot give VERDICT: DONE" is not). An older round's report never counts.
+// Finished only when it says so (final F1): a turn completed and its reply ends `VERDICT: DONE` on a
+// line of its own ("I cannot give VERDICT: DONE" is not). An older round's report never counts.
+const DONE_RE = /(^|\n)[ \t]*VERDICT:[ \t]*DONE[ \t]*$/;
+// The old thread's latest turn; the messages file says per message what is left (every worker hand-off
+// has one since plan 1120 S3 r1 F2).
 function turnState(snap, threadId) {
   const reply = snap.status === "completed" && snap.latestRunId ? (runReplies(threadId, snap.latestRunId).at(-1) ?? "").trim() : "";
-  return /(^|\n)[ \t]*VERDICT:[ \t]*DONE[ \t]*$/.test(reply)
-    ? " Its last turn completed with `VERDICT: DONE`: don't redo the stage or that round; do the round at the end."
-    : ` Its last turn ${snap.status === "completed" ? "ended without `VERDICT: DONE`" : `did not finish (${snap.status})`}: its work is not finished`
-      + " (its report may be from an earlier round; one ending `HANDOFF:` lists what is left). Compare the diff with the original task and its last round,"
-      + " finish what is missing, then do the round at the end, if any.";
+  if (DONE_RE.test(reply)) return " Its last turn completed with `VERDICT: DONE`.";
+  return ` Its last turn ${snap.status === "completed" ? "ended without `VERDICT: DONE`" : `did not finish (${snap.status})`}: its work is not finished`
+    + " (its report may be from an earlier round; one ending `HANDOFF:` lists what is left).";
 }
-// The lead's messages on a thread: user turns minus background-task notifications and T3's limit resumes.
+// The lead's messages on a thread, oldest first: user turns minus background-task notifications,
+// T3's limit resumes and the launcher's own nudges (LAUNCHER_NUDGES, exact text). Each keeps its run.
 function leadMessages(threadId) {
-  return t3Query("select message_id, payload_json from orchestration_v2_projection_messages where thread_id = ? and role = 'user' order by created_at, message_id", [threadId])
-    .map((m) => ({ id: m.message_id, ...JSON.parse(m.payload_json) })).filter((m) => !m.notification && !m.id.startsWith("limit-resume:"));
+  return t3Query("select message_id, run_id, created_at, payload_json from orchestration_v2_projection_messages where thread_id = ? and role = 'user' order by created_at, message_id", [threadId])
+    .map((m) => ({ ...JSON.parse(m.payload_json), id: m.message_id, runId: m.run_id, at: m.created_at }))
+    .filter((m) => !m.notification && !m.id.startsWith("limit-resume:") && !LAUNCHER_NUDGES.includes((m.text ?? "").trim()));
+}
+
+// Hand-off messages file (plan 1120 S3): every lead message of the old thread, in order, each headed
+// with the turn (run) that answered it and how that turn ended. A message's turn is the last run from
+// its own up to the next lead message's (nudge and notification runs included), past turns that
+// completed without a reply. PENDING: every message after the last turn that ended `VERDICT: DONE`.
+// The successor's brief inlines the original task once and points at the file with an
+// `EARLIER LEAD MESSAGES: <file>` line, so a later hand-off lists that brief as a pointer to the
+// earlier file instead of nesting it.
+const EARLIER = "EARLIER LEAD MESSAGES: ";
+const IN_BRIEF = "inlined in the hand-off brief between the ORIGINAL TASK markers";
+function handoffEntries(threadId) {
+  const asks = leadMessages(threadId);
+  const runs = t3Query("select run_id, ordinal, status, requested_at from orchestration_v2_projection_runs where thread_id = ? order by ordinal", [threadId]);
+  const ordOf = (m) => runs.find((r) => r.run_id === m.runId)?.ordinal ?? runs.find((r) => m.at && r.requested_at >= m.at)?.ordinal ?? Infinity;
+  const ords = asks.map(ordOf);
+  return asks.map((m, i) => {
+    const from = ords[i], to = Math.min(Infinity, ...ords.slice(i + 1).filter((o) => o > from));
+    let run = null, reply = "";
+    for (const r of runs.filter((x) => x.ordinal >= from && x.ordinal < to).reverse()) {
+      const replies = runReplies(threadId, r.run_id);
+      if (r.status !== "completed" || replies.length) { run = r; reply = (replies.at(-1) ?? "").trim(); break; }
+      run ??= r;
+    }
+    const outcome = !run ? "not started" : run.status !== "completed" ? `did not finish (${run.status})`
+      : DONE_RE.test(reply) ? "completed with VERDICT: DONE" : "completed without VERDICT: DONE";
+    return { text: m.text ?? "", turn: run?.ordinal ?? null, outcome, done: outcome === "completed with VERDICT: DONE" };
+  });
+}
+function entryText(text, task, first) {
+  const full = text, t = text.trim();
+  if (task && t === task) return first ? `(the original task: ${IN_BRIEF})` : `(the lead resent the original brief: ${IN_BRIEF})`;
+  const brief = generatedBrief(full);
+  if (brief?.earlier) {
+    const { before, after } = brief;
+    return `${before ? `${before}\n\n` : ""}(a hand-off brief) Earlier lead messages: ${brief.earlier}. Its PENDING messages were handed on with this brief: they are still pending unless this message's turn ended \`VERDICT: DONE\`.`
+      + (after ? `\n\nGiven with it:\n\n${after === task ? `(the original brief again: ${IN_BRIEF})` : after}` : "");
+  }
+  // A brief from before S3 (its LAST ROUND block kept): only an outer task block (matched with nesting,
+  // r2) that holds this task is taken out; a message quoting another block keeps it, and unbalanced
+  // markers keep the whole text.
+  const b = task ? (taskBlocks(full) ?? []).find((x) => blockTask(full, x).trim() === task) : null;
+  if (b) return `${full.slice(0, b.open)}(the original task: ${IN_BRIEF})${full.slice(b.end)}`.trim();
+  return t;
+}
+// null when the thread has no lead message.
+function handoffMessages(threadId) {
+  const entries = handoffEntries(threadId);
+  if (!entries.length) return null;
+  const task = (generatedBrief(entries[0].text)?.task ?? entries[0].text).trim();
+  const lastDone = entries.findLastIndex((e) => e.done);
+  entries.forEach((e, i) => { e.n = i + 1; e.pending = i > lastDone; });
+  const body = `# Lead messages to thread ${threadId}\n\n`
+    + "Every message its lead sent it, oldest first (T3 notifications, limit resumes and the launcher's own nudges left out), each headed with the turn that answered it and how that turn ended. "
+    + "PENDING marks every message after the last turn that ended `VERDICT: DONE` (all of them when none did): do those, in order.\n\n"
+    + entries.map((e, i) => `## Message ${e.n} · turn ${e.turn ?? "none"} · ${e.outcome} · ${e.pending ? "PENDING" : "done"}\n\n${entryText(e.text, task, i === 0)}\n`).join("\n");
+  return { task, entries, body };
+}
+function pendingLine(entries, file) {
+  const pending = entries.filter((e) => e.pending).map((e) => e.n);
+  if (!pending.length) return `Every message its lead sent it is in ${file}, oldest first: all are done (its last turn ended \`VERDICT: DONE\`), so don't redo them.`;
+  return `Every message its lead sent it is in ${file}, oldest first, each headed with how its turn ended. Do every message marked PENDING there, in order (${pending.length === 1 ? "message" : "messages"} ${pending.join(", ")} of ${entries.length}: those after its last \`VERDICT: DONE\` turn); compare the diff with each first and keep what is already done.`;
+}
+// Written whole or not at all: a reader never sees half a file.
+function writeAtomic(file, text) {
+  const tmp = `${file}.tmp-${process.pid}`;
+  fs.writeFileSync(tmp, text);
+  fs.renameSync(tmp, file);
 }
 const recorded = (dir, threadId) => ["thread_id", "thread_ids_prev"].some((f) => {
   try { return fs.readFileSync(path.join(dir, f), "utf8").split(/\s+/).includes(threadId); } catch { return false; }
@@ -452,23 +599,31 @@ async function runThread(attempt) {
         }
         snap = done.thread;
       }
-      saveReport(snap, true);
-      // A worker's successor gets the stage's original task and its last round once, with this round.
-      let task = "", prev = "", state = "";
+      // A worker's successor gets every lead message of the old thread in a file, each with how its
+      // turn ended, and the stage's original task once (plan 1120 S3); then this round. Read before
+      // anything changes: without them nothing is saved, settled or started (r1 F2).
+      let msgs = null, state = "", msgFile = null;
       if (!reviewer) {
-        try { const asks = leadMessages(attach); task = unwrapTask(asks[0]?.text ?? "").trim(); prev = lastRound(asks); state = turnState(snap, attach); }
-        catch (e) { log("handoff: original task", e.message); }
+        msgs = handoffMessagesOrStop(attach, snap);
+        state = msgs.state;
+        let k = n; while (fs.existsSync(path.join(job, `handoff-${k}-messages.md`))) k++; msgFile = path.join(job, `handoff-${k}-messages.md`);
       }
-      if (task === unwrapTask(prompt).trim()) task = "";
-      if (prev === prompt.trim()) prev = "";
+      saveReport(snap, true);
+      const task = msgs?.task ?? "";
+      // The lead sent the original brief again: it is inlined once, above (final F2: no second copy).
+      const round = task && prompt.trim() === task
+        ? "The lead sent the original brief again (above, between the ORIGINAL TASK markers): finish it, after the PENDING messages."
+        : prompt;
       await abandon(attach, "handoff");
+      // Only now: the file describes a thread that has handed off (a refused settle starts nothing and writes nothing).
+      if (msgs) writeAtomic(msgFile, msgs.body);
       const title = !process.env.TITLE && snap.title ? snap.title : null;
       handoff = { from: attach, n, title,
         text: `You take over from thread ${attach}; its last report is ${path.join(job, "report.md")}.${process.env.PLAN ? `\nPLAN: ${process.env.PLAN}` : ""}\n\n`
           + (task || state ? `Its edits are uncommitted in the tree: read \`git status\` and \`git diff\` for its files first and keep what it finished.${state}\n\n` : "")
-          + (task ? `Its original task, for owned files, rules and Verify commands:\n\n${wrapTask(task)}\n\n`
-            + (prev ? `## Its last round\n\n${wrapRound(prev)}\n\n` : "") + "## This round\n\n" : "")
-          + prompt };
+          + (msgs ? `${pendingLine(msgs.entries, msgFile)} Then do this round.\n\n` : "")
+          + (task ? `Its original task, for owned files, rules and Verify commands:\n\n${wrapTask(task)}\n\n` : "")
+          + (msgs ? `${EARLIER}${msgFile}\n\n## This round\n\n${round}` : prompt) };
       if (snap.modelSelection && !process.env.EFFORT) adopt(current(snap.modelSelection));
       if (modelSelection.instanceId === claudeAccount.t3Instance) modelSelection = { ...modelSelection, instanceId: claudeAccount.t3WorkerInstance };
       attach = undefined;
@@ -527,7 +682,7 @@ async function runThread(attempt) {
     rc = 124;
     try { thread = getThread(threadId) ?? thread; } catch { /* keep the last read */ }
   }
-  return { threadId, thread, rc };
+  return { threadId, thread, rc, priorRunId };
 }
 
 // A reply that isn't the answer: a review or worker brief asks for a `VERDICT:` line and the turn
@@ -540,7 +695,7 @@ async function runThread(attempt) {
 // wording for a review, worker wording otherwise). Up to 4 extra turns, then the last reply is the
 // report, said on stderr and in run.log.
 const VERDICT_RE = /^VERDICT:\s*(APPROVE|REVISE|DONE|BLOCKED)\b/m;
-const VERDICT_NUDGE = "Your last turn ended without a verdict. Finish the review now: read the results of anything you started (or run the checks yourself in the foreground), then send the full packet ending in \"VERDICT: APPROVE\" or \"VERDICT: REVISE\". Don't end the turn waiting.";
+// VERDICT_NUDGE and workerNudge: at the top (LAUNCHER_NUDGES).
 // A sentence that says the thread itself waits on its own pending work; one that waits on a person or
 // a decision ("waiting for your review", "still waiting on a separate GO") is a finished report.
 // "Running in (the) background" counts for the thread's own work (tests, a job, a run, its helpers,
@@ -575,9 +730,7 @@ function answered(threadId, t) {
   const text = lastReplyOf(threadId, t);
   return asksVerdict ? VERDICT_RE.test(text) : !waitingOnly(text);
 }
-const waitNudge = () => reviewsVerdict() ? VERDICT_NUDGE
-  : "Your last turn ended on waiting, so whatever you were waiting for can't reach your lead. Check it now: read its output, or wait for it inside this turn (t3_background_wait on its task, or run it in the foreground with a fitting timeout), then send your full report"
-    + (asksVerdict ? " ending in \"VERDICT: DONE\" or \"VERDICT: BLOCKED\"" : "") + ". Don't end the turn waiting.";
+const waitNudge = () => reviewsVerdict() ? VERDICT_NUDGE : workerNudge(asksVerdict);
 async function awaitAnswer(threadId, thread) {
   const waitMs = Number(process.env.VERDICT_WAIT_MIN ?? 15) * 60000;
   const why = (t) => waitingOnly(lastReplyOf(threadId, t)) ? "waiting reply" : "no verdict";
@@ -659,6 +812,38 @@ for (let attempt = 1; attempt <= 3; attempt++) {
   saveReport(thread);
   await abandon(threadId, "usage limit");
 }
+
+// A provider-error turn isn't a review round (plan 1120 S3b: a recheck killed by a "cybersecurity
+// risk" flag counted as rounds 2 and 3). The round counted at the send goes back when the launch ends
+// failed (rc ≠ 0, a lastError, not a usage limit: the go-around above handles those) and no turn of
+// this launch replied: any assistant reply in a run after the one the launch started from (a turn that
+// replied and then failed still counts). rounds_failed gets a line first, then `rounds` goes back, so
+// a crash in between over-counts rather than under-counts.
+function repliedSince(threadId, priorRunId) {
+  const runs = t3Query("select run_id from orchestration_v2_projection_runs where thread_id = ? order by ordinal", [threadId]).map((r) => r.run_id);
+  const from = priorRunId ? runs.indexOf(priorRunId) + 1 : 0;
+  return runs.slice(from).some((id) => runReplies(threadId, id).length > 0);
+}
+function uncountProviderError({ thread, rc, threadId, priorRunId }) {
+  if (!roundCounted || rc === 0 || !thread?.lastError) return;
+  if (thread.lastErrorClass === "usage_limit" || limitRe.test(thread.lastError)) return;
+  // Only this launch's failure: a timeout (the launcher interrupted it) or a new run that ended
+  // without failing (interrupted, cancelled) is no provider error, whatever older session error
+  // T3 still reports as lastError (it outlives the turn that failed).
+  if (rc === 124) return;
+  if (thread.latestRunId && thread.latestRunId !== priorRunId && thread.status !== "failed") return;
+  let replied = true;
+  try { replied = repliedSince(threadId, priorRunId); } catch (e) { log("rounds: reading replies", e.message); }
+  if (replied) return;
+  const line = `round ${countedRound} not counted: provider error: ${thread.lastError.replace(/\s+/g, " ").trim().slice(0, 160)}`;
+  fs.appendFileSync(path.join(job, "rounds_failed"), `${new Date().toISOString()} ${threadId} ${line}\n`);
+  const file = path.join(job, "rounds");
+  if (roundsBefore === null) fs.rmSync(file, { force: true }); else fs.writeFileSync(file, roundsBefore);
+  roundCounted = false;
+  log(line);
+  console.error(line);
+}
+uncountProviderError(result);
 
 const { thread, rc, threadId } = result;
 saveReport(thread);

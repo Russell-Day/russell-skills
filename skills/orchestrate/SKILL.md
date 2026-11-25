@@ -225,10 +225,17 @@ ATTACH=$(cat ~/.local/state/agent-jobs/<prefix><stage>-impl/thread_id) CONTINUE=
 
 A worker at 2+ compactions gets no new round: `CONTINUE=1` (or a project's
 `--next-round`) moves it to a fresh thread with the old id, last report, PLAN,
-its original task and last round (once each, for owned files, rules and Verify
-commands) and the findings (a fix round on a longer thread often ends before
-any edit). The successor skips the stage and that round only when the worker's
-last turn completed with `VERDICT: DONE`; otherwise it finishes them first.
+its original task once (for owned files, rules and Verify commands), the
+findings (a fix round on a longer thread often ends before any edit) and
+`<job>/handoff-<n>-messages.md`: every message its lead sent it, in order, each
+with how its turn ended (the launcher's own nudges, limit resumes and
+notifications left out). Every message after its last `VERDICT: DONE` turn is
+PENDING and the successor does those first, so a fix the old worker never
+finished, or one sent before a resent brief, isn't lost. A successor's own
+hand-off points at the earlier file instead of nesting it.
+Put your own notes and findings after the brief's last line (`EARLIER LEAD
+MESSAGES: …`), never above its first: a note above it makes the next hand-off
+carry the whole brief as the task.
 Hand off only after the worker's turn has ended.
 A stage whose first turn compacts 3+ times was too big: split what's left. Then a targeted recheck on the **same reviewer thread**
 with the subagents `recheck-prompt.md` (`ATTACH=<review thread> CONTINUE=1`),
