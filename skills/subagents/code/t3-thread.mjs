@@ -543,9 +543,11 @@ const VERDICT_RE = /^VERDICT:\s*(APPROVE|REVISE|DONE|BLOCKED)\b/m;
 const VERDICT_NUDGE = "Your last turn ended without a verdict. Finish the review now: read the results of anything you started (or run the checks yourself in the foreground), then send the full packet ending in \"VERDICT: APPROVE\" or \"VERDICT: REVISE\". Don't end the turn waiting.";
 // A sentence that says the thread itself waits on its own pending work; one that waits on a person or
 // a decision ("waiting for your review", "still waiting on a separate GO") is a finished report.
-// "Running in the background" counts for the thread's own work (tests, a job, a run), not a service
-// it reports on ("the queue is still running in the background").
-const WAITING_RE = /\b(?:(?:I'm|I am|now|still|currently) (?:waiting|awaiting)|I'll wait|(?:tests?|suites?|checks?|jobs?|runs?|builds?|replays?|bench(?:es)?|pytest|playwright|task|it|they)(?: (?:is|are|still|now))* running in the background|I'll (?:report|reply|follow up|post|send|write|summari[sz]e|update|finish|continue)\b[^.\n]{0,60}?\b(?:when|once|after|as soon as)\b|wait(?:ing)? for (?:the )?background|(?:when|once|after) [^.\n]{1,80}? (?:finish(?:es)?|complete[sd]?|(?:is|are) done|comes? back|lands?)\b[^.\n]{0,40}\bI'll)\b|(?:^|[;,:–—]\s*)(?:waiting|awaiting)\b(?!\s*,)/i;
+// "Running in (the) background" counts for the thread's own work (tests, a job, a run, its helpers,
+// explorers, reviewers or delegates), not a service it reports on ("the queue is still running in the
+// background"). The subject sits in a lookbehind, so the text checked by notOurs() starts at "running"
+// ("the reviewer is still running in the background" is the thread's own helper, not a wait on a review).
+const WAITING_RE = /\b(?:(?:I'm|I am|now|still|currently) (?:waiting|awaiting)|I'll wait|(?<=\b(?:tests?|suites?|checks?|jobs?|runs?|builds?|replays?|bench(?:es)?|pytest|playwright|tasks?|helpers?|workers?|(?:sub)?agents?|explorers?|reviewers?|delegates?|children|(?:child )?threads?|it|they)(?: (?:is|are|still|now))* )running in (?:the )?background|I'll (?:report|reply|follow up|post|send|write|summari[sz]e|update|finish|continue)\b[^.\n]{0,60}?\b(?:when|once|after|as soon as)\b|wait(?:ing)? for (?:the )?background|(?:when|once|after) [^.\n]{1,80}? (?:finish(?:es)?|complete[sd]?|(?:is|are) done|comes? back|lands?)\b[^.\n]{0,40}\bI'll)\b|(?:^|[;,:–—]\s*)(?:waiting|awaiting)\b(?!\s*,)/i;
 // People a report may wait on: the reader, the lead, the user, and the user's first name (from
 // OWNER_NAME, else git's user.name), so "awaiting <name>'s decision" is a finished report.
 let notOursRe;

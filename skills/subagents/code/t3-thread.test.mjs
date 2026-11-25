@@ -846,7 +846,12 @@ test("waiting: a DONE/BLOCKED worker ending \"When the replays finish, I'll …\
 });
 
 test("waiting: \"Full suite is running in the background.\", \"Awaiting task completion.\" and an aside wait for the wake-up too", () => {
-  for (const last of ["Full suite is running in the background.", "Tests running in the background. I'll report when done.", "I'll report when the tests finish.", "Task launched. Awaiting task completion.", "Waiting on the idle loop (the user is busy; restart only once idle)."]) {
+  for (const last of ["Full suite is running in the background.", "Tests running in the background. I'll report when done.", "I'll report when the tests finish.",
+    "The build is still running in the background.", "Playwright running in the background; I'll post the packet once it lands.", "I'll send the full report as soon as pytest is done.",
+    "Three helpers are running in the background. Their reports are not in yet.", "explorers still running in background", "Two Gemini explorers still running in background.", "Suite still running in background.",
+    "Two reviewers are running in the background. Their reports are not in yet.", "The reviewer is still running in the background.", "Both delegates running in the background.",
+    "Four workers are running in background; their packets come next.", "The subagents are still running in the background.", "Child threads running in the background.",
+    "Task launched. Awaiting task completion.", "Waiting on the idle loop (the user is busy; restart only once idle)."]) {
     const f = wakeHome("Restart the server once idle and report.");
     ok(f.review("p1", { FAKE_WAKE: "self", VERDICT_WAIT_MIN: "1", FAKE_FIRST: last }));
     assert.equal(f.read("report.md"), "woken packet\n\nVERDICT: APPROVE", last);
@@ -870,10 +875,11 @@ test("waiting: a brief that only mentions \"VERDICT:\" without a value asks for 
   assert.equal(f.read("report.md"), "Implemented the label.");
 });
 
-test("waiting: a finished worker report that merely mentions waiting on a person or decision is the report at once", () => {
+test("waiting: a finished worker report that merely mentions waiting on a person, a decision or a service is the report at once", () => {
   for (const last of ["Changes are uncommitted, waiting for your review.", "Committed 3 files; the nightly sync keeps its own schedule.",
     "Embeddings haven't been run and are still waiting on a separate GO.", "I'm waiting for your go.", "Ready to merge; awaiting Sam's decision on F2.",
-    "I'm waiting for Sam to pick a name.", "Changes complete. The queue is still running in the background.", "I'll report back once you confirm the copy.", "Optional: a \"queue still waiting\" banner when a reply arrives.", "Sidebar groups: Running, Waiting, Idle, Done."]) {
+    "I'm waiting for Sam to pick a name.", "Changes complete. The queue is still running in the background.", "Done. The sync service is running in the background as before.",
+    "Done. The indexer still runs in background mode.", "I'll report back once you confirm the copy.", "Optional: a \"queue still waiting\" banner when a reply arrives.", "Sidebar groups: Running, Waiting, Idle, Done."]) {
     const f = wakeHome("Rename the setting and report what changed.");
     ok(f.review("p1", { FAKE_WAKE: "none", VERDICT_WAIT_MIN: "0.1", OWNER_NAME: "Sam", FAKE_FIRST: `Renamed in 2 files.\n\n${last}` }));
     assert.equal(f.sent("message.dispatch").length, 1, last);
