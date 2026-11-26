@@ -58,7 +58,7 @@
 // state DB, commands over its internal WebSocket API. After a `t3 update`, run
 // `node t3-api.mjs --check`. run.sh is the headless fallback.
 import { execFileSync } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -191,8 +191,10 @@ function parseDuration(s) {
 
 let modelSelection = selection(model);
 const timeoutMs = parseDuration(process.env.TIMEOUT ?? "45m");
-const job = path.join(process.env.AGENT_JOBS_DIR ?? path.join(home, ".local/state/agent-jobs"),
+const JOBS_ROOT = path.resolve(process.env.AGENT_JOBS_DIR ?? path.join(home, ".local/state/agent-jobs"));
+const job = path.join(JOBS_ROOT,
   process.env.JOB ?? `${new Date().toISOString().replace(/[-:]/g, "").slice(0, 15)}-${model}-t3`);
+{ const bad = jobDirProblem(job); if (bad) { console.error(`job dir ${JSON.stringify(job)} ${bad}: hand-offs read its files only there (pick a JOB that is one plain name)`); process.exit(2); } }
 fs.mkdirSync(job, { recursive: true });
 fs.copyFileSync(promptSrc, path.join(job, "prompt.md"));
 fs.appendFileSync(path.join(job, "prompt.md"), "\n\n" + fs.readFileSync(path.join(here, "worker-communication.md"), "utf8"));
@@ -317,7 +319,14 @@ const settle = (threadId) => process.env.NO_SETTLE ? null : settleThread(threadI
 // Returns them with `state`, how the old thread's latest turn ended (read in the same go).
 function handoffMessagesOrStop(threadId, snap) {
   let msgs = null, why;
-  try { msgs = handoffMessages(threadId); if (msgs) msgs.state = turnState(snap, threadId); }
+  try {
+    // The job's own manifest takes the new records after the old thread is settled: it must be readable
+    // and writable now (final r3 F4).
+    launcherFiles(job);
+    fs.accessSync(fs.existsSync(path.join(job, MANIFEST)) ? path.join(job, MANIFEST) : job, fs.constants.W_OK);
+    msgs = handoffMessages(threadId, { root: path.dirname(job), names: [path.basename(job)], thread: threadId });
+    if (msgs) msgs.state = turnState(snap, threadId, msgs.entries);
+  }
   catch (e) { why = `couldn't read them (${e.message})`; }
   if (!why && !msgs) why = "it has none";
   else if (!why && !msgs.task) why = "its first message is empty";
@@ -434,40 +443,168 @@ function taskBlocks(text, from = 0) {
   return depth ? null : blocks;
 }
 const blockTask = (text, b) => text.slice(b.open + TASK_OPEN.length + 1, Math.max(b.open + TASK_OPEN.length + 1, b.close - 1));
-// A hand-off brief this launcher wrote, known by its whole layout, never by one line (plan 1120 S3
-// r1 F1, r2): the message opens with a line "You take over from …thread <id>" (only T3's
-// delegate_task line "Act as the … sub-agent for this task." may come before it), then the task
-// block, matched with nesting, and, since S3, the EARLIER line right after that block's close and
-// after no other. Returns that delegate line (kept in the entry), the task, the EARLIER file (null in
-// a brief from before S3) and what follows that line (the round, or the lead's findings). Anything
-// else is the lead's own text, kept whole: a task or note that quotes a brief, a lead's words before
-// the takeover line, unbalanced markers.
+// The job chain a hand-off reads (plan 1120 S3 final F1): a lead message names a file the launcher
+// wrote (an EARLIER messages file) only in a job dir of this chain, right under
+// `root`: a dir in `names` (the CONTINUE job) or one whose `thread_id` /
+// `thread_ids_prev` records the thread being read. Any other path stays literal: the launcher never
+// reads it into a successor's brief.
+function recordsThread(dir, threadId) {
+  return ["thread_id", "thread_ids_prev"].some((f) => {
+    try { return fs.readFileSync(path.join(dir, f), "utf8").split(/\s+/).includes(threadId); } catch { return false; }
+  });
+}
+// `p` names a file in a job dir of this chain: absolute and normalized, a name `nameRe` matches, its
+// dir right under the chain root and in the chain (any dir name the launcher may write to: final r3
+// F4). Nothing is read.
+function inChain(p, chain, nameRe) {
+  if (!chain || !path.isAbsolute(p) || path.normalize(p) !== p || !nameRe.test(path.basename(p))) return false;
+  const dir = path.dirname(p), name = path.basename(dir);
+  return path.dirname(dir) === path.resolve(chain.root) && (chain.names.includes(name) || recordsThread(dir, chain.thread));
+}
+// Launcher files (plan 1120 final r2 F1/F4): every hand-off messages file the launcher writes is
+// recorded in its job dir's launcher-files.jsonl with the whole file's sha256, its brief's head sha
+// (`head`) and every recorded file it depends on (`deps`, the chain's earlier messages files). A
+// hand-off trusts a file a lead message names only when its dir's manifest lists it: an unlisted file
+// is literal text (never read, never a stop); a listed one that is missing or no longer the file
+// written stops the hand-off, and so does any file it depends on. Files of a job written before the
+// manifest are never read or checked (generatedBrief still knows such a brief by its head file or the
+// frozen layout, and passes its EARLIER line on as text).
+const MANIFEST = "launcher-files.jsonl";
+const sha256 = (text) => createHash("sha256").update(text).digest("hex");
+// name → its latest record; null when the dir has no manifest. A manifest that is there but can't be
+// read throws (final r3 F4): it never falls back to the old-job rules.
+function launcherFiles(dir) {
+  let raw;
+  try { raw = fs.readFileSync(path.join(dir, MANIFEST), "utf8"); }
+  catch (e) { if (e.code === "ENOENT" || e.code === "ENOTDIR") return null; throw new Error(`${path.join(dir, MANIFEST)} can't be read (${e.message})`); }
+  const files = new Map();
+  for (const line of raw.split("\n")) { try { const r = JSON.parse(line); if (r?.name) files.set(r.name, r); } catch { /* blank or torn line */ } }
+  return files;
+}
+// Written whole, then recorded: a crash between leaves it unlisted (literal), never a false stop.
+// A job dir is one plain name right under the absolute jobs root, because that is the only place a
+// hand-off looks for recorded files (inChain), and briefs name them by path ending at whitespace
+// (final r4/r5 F4). Any other dir would hold files no hand-off could read back or check, so the CLI
+// refuses it up front and writeLauncherFile refuses to record into it. null = fine.
+function jobDirProblem(dir) {
+  if (/\s/.test(dir)) return "contains whitespace";
+  if (!path.isAbsolute(dir)) return "isn't an absolute path";
+  if (path.dirname(dir) !== JOBS_ROOT || path.normalize(dir) !== dir) return `isn't a single name right under ${JOBS_ROOT}`;
+  return null;
+}
+function writeLauncherFile(file, text, extra = {}) {
+  const bad = jobDirProblem(path.dirname(file));
+  if (bad) throw new Error(`${file}: its job dir ${bad}, so no hand-off could read it back`);
+  writeAtomic(file, text);
+  fs.appendFileSync(path.join(path.dirname(file), MANIFEST), `${JSON.stringify({ name: path.basename(file), sha256: sha256(text), at: new Date().toISOString(), ...extra })}\n`);
+}
+// The next free hand-off number in `dir`: at least `n`, past every handoff-<k>-* there or recorded
+// (final r2 F4: a deleted file's name is never reused, so no chain points at itself).
+function nextHandoff(dir, n) {
+  let names = [];
+  try { names = fs.readdirSync(dir); } catch { /* not made yet */ }
+  const ks = [...names, ...(launcherFiles(dir)?.keys() ?? [])].map((x) => /^handoff-(\d+)-/.exec(x)?.[1]).filter(Boolean).map(Number);
+  return Math.max(n, ...ks.map((k) => k + 1));
+}
+// A listed launcher file read and checked whole, then every file it depends on in turn. Each one
+// read goes into `chain.deps`. Throws when one is missing, not a regular file in its job dir under
+// the chain root, unreadable, changed, or a dependency is no longer recorded.
+function checkRecorded(p, rec, chain, seen = new Set()) {
+  seen.add(p);
+  const dir = path.dirname(p), name = path.basename(dir);
+  let there = false;
+  try { there = path.dirname(dir) === path.resolve(chain.root) && fs.realpathSync(dir) === path.join(fs.realpathSync(chain.root), name) && fs.lstatSync(p).isFile(); } catch { /* missing */ }
+  if (!there) throw new Error(`${p} is missing or not a regular file in its job dir`);
+  let text;
+  try { text = fs.readFileSync(p, "utf8"); } catch (e) { throw new Error(`${p} can't be read (${e.message})`); }
+  if (sha256(text) !== rec.sha256) throw new Error(`${p} changed since the launcher wrote it`);
+  chain.deps?.add(p);
+  for (const d of rec.deps ?? []) {
+    if (seen.has(d)) continue;
+    const r = launcherFiles(path.dirname(d))?.get(path.basename(d));
+    if (!r) throw new Error(`${d}, which ${p} depends on, is no longer recorded`);
+    checkRecorded(d, r, chain, seen);
+  }
+  return { file: p, text, rec };
+}
+// A worker hand-off records its brief's head (the takeover line through its EARLIER line) with the
+// messages file it names, as a sha256 (final F2): a later hand-off counts a lead message as that brief
+// only when it is exactly that text. Before the manifest the sha was a file beside it (headFile).
+const MESSAGES_FILE_RE = /^handoff-\d+-messages\.md$/;
+const headFile = (msgFile) => msgFile.replace(/-messages\.md$/, "-head.sha256");
+const headSha = sha256;
+// Briefs from before the head was recorded (plan 1120 S3 up to final F2): the launcher's whole layout,
+// every sentence of it, with nothing outside its slots (thread id, report path, PLAN path, the
+// turn-state and PENDING sentences); the task and what follows the EARLIER line stay whole.
+const STATE_SRC = String.raw` Its last turn (?:completed with \`VERDICT: DONE\`\.|(?:ended without \`VERDICT: DONE\`|did not finish \([\w-]+\))(?:: its work is not finished \(its report may be from an earlier round; one ending \`HANDOFF:\` lists what is left\)\.|, but that turn answered no lead message: every lead message's turn ended \`VERDICT: DONE\`\.))`;
+const PENDING_SRC = String.raw`Every message its lead sent it is in \S+, oldest first(?:: all are done \((?:its last turn|its last lead message's turn) ended \`VERDICT: DONE\`\), so don't redo them\.|, each headed with how its turn ended\. Do every message marked PENDING there, in order \(messages? \d+(?:, \d+)* of \d+: those after its last \`VERDICT: DONE\` turn\); compare the diff with each first and keep what is already done\.)`;
+const EDITS_SRC = String.raw`Its edits are uncommitted in the tree: read \`git status\` and \`git diff\` for its files first and keep what it finished\.`;
+const LAYOUT_RES = [
+  new RegExp(String.raw`^You take over from thread \S+; its last report is \S+\.(?: Earlier rounds of \S+: report\.r\d+\.md(?:, report\.r\d+\.md)* beside it \(report\.md is the latest round; read them together, a fix round's reply may not repeat the first packet\)\.)?(?:\nPLAN: \S+)?\n\n${EDITS_SRC}${STATE_SRC}\n\n${PENDING_SRC} Then do this round\.\n\nIts original task, for owned files, rules and Verify commands:\n\n$`),
+];
+// Briefs from before S3 (the task between the markers, no EARLIER line: plan 1088 final F2 up to
+// plan 1120 S3): their task is taken out only from that launcher's whole layout, sentence by sentence.
+const PRE_STATE_SRC = String.raw` (?:Its last turn completed with \`VERDICT: DONE\`: don't redo the stage or that round; do the round at the end\.|If that report ends with \`HANDOFF:\`, (?:is empty or names work still open, finish that first; otherwise don't redo the stage: do the round below|it stopped mid-task: finish what it lists as left)\.|Its last turn (?:ended without \`VERDICT: DONE\`|did not finish \([\w-]+\)): its work is not finished \(its report may be from an earlier round; one ending \`HANDOFF:\` lists what is left\)\. Compare the diff with the original task and its last round, finish what is missing, then do the round at the end, if any\.)`;
+const PRE_LAYOUT_RES = [
+  new RegExp(String.raw`^You take over from thread \S+; its last report is \S+\.(?: Earlier rounds of \S+: report\.r\d+\.md(?:, report\.r\d+\.md)* beside it \(report\.md is the latest round; read them together, a fix round's reply may not repeat the first packet\)\.)?(?:\nPLAN: \S+)?\n\n${EDITS_SRC}${PRE_STATE_SRC}\n\nIts original task, for owned files, rules and Verify commands:\n\n$`),
+];
+// A hand-off brief this launcher wrote (plan 1120 S3 r1 F1, r2, final F1/F2): the message opens with
+// the takeover line (only T3's delegate_task line "Act as the … sub-agent for this task." may come
+// before it) and, from there through an `EARLIER LEAD MESSAGES: <file>` line right after a task
+// block's close, is exactly the head recorded with that file in this chain's manifest (inChain).
+// With no head recorded: the launcher's layout from before the record (LAYOUT_RES), the EARLIER line
+// right after the first outer task block (matched with nesting). Returns that delegate line (kept in
+// the entry), the task, the EARLIER file and what follows that line (the round, or the lead's
+// findings). Anything else, a takeover note of the lead's own with its instructions included, is the
+// lead's text, kept whole. A brief from before S3 (PRE_LAYOUT_RES) gives its task only (earlier null:
+// entryText's old format).
 const TAKEOVER_RE = /(?:^|\n)[ \t]*You take over from (?:worker )?thread \S+/;
 const DELEGATE_LINE_RE = /^Act as the [\w -]+ sub-agent for this task\.$/;
-const EARLIER_AFTER_RE = /^\n\nEARLIER LEAD MESSAGES: (\S+)[ \t]*(?:\n|$)/;
-function generatedBrief(text) {
+function generatedBrief(text, chain) {
   const t = TAKEOVER_RE.exec(text);
   if (!t) return null;
   const from = t.index + (text[t.index] === "\n" ? 1 : 0), before = text.slice(0, from).trim();
   if (before && !DELEGATE_LINE_RE.test(before)) return null;
-  const blocks = taskBlocks(text, from);
-  if (!blocks?.length) return null;
-  const earlierAfter = (b) => EARLIER_AFTER_RE.exec(text.slice(b.end));
-  const m = earlierAfter(blocks[0]);
-  // An EARLIER line after a later block but not after the first: the layout is not the launcher's.
-  if (!m && blocks.slice(1).some(earlierAfter)) return null;
-  const rest = text.slice(blocks[0].end);
-  return { before, task: blockTask(text, blocks[0]), earlier: m?.[1] ?? null, after: m ? rest.slice(m[0].length).replace(/^\s*## This round\s*/, "").trim() : null };
+  // Every EARLIER line right after a close line may end the head (a task can quote older briefs).
+  // It is the brief only once its head matches (final r2 F2): no file is required before that, so a
+  // note quoting an old brief never stops a hand-off.
+  for (const m of text.slice(from).matchAll(/\nORIGINAL TASK>>>\n\nEARLIER LEAD MESSAGES: (\S+)(?=\n|$)/g)) {
+    if (!inChain(m[1], chain, MESSAGES_FILE_RE)) continue;
+    const close = from + m.index, end = close + m[0].length, sha = headSha(text.slice(from, end));
+    const rec = launcherFiles(path.dirname(m[1]))?.get(path.basename(m[1]));
+    let legacy = null, open;
+    if (!rec) try { legacy = fs.readFileSync(headFile(m[1]), "utf8").trim(); } catch { /* not recorded */ }
+    if (rec || legacy) {
+      if ((rec ? rec.head : legacy) !== sha) continue;
+      open = text.indexOf(`\n${TASK_OPEN}\n`, from) + 1; // the head's own lines hold no marker
+    } else {
+      const first = taskBlocks(text, from)?.[0];
+      if (!first || first.close !== close + 1 || !LAYOUT_RES.some((re) => re.test(text.slice(from, first.open)))) continue;
+      open = first.open;
+    }
+    if (open <= from || open > close) continue;
+    // The launcher's brief: its messages file and every file that one depends on must be intact (F4).
+    if (rec) checkRecorded(m[1], rec, chain);
+    const body = open + TASK_OPEN.length + 1;
+    return { before, task: text.slice(body, Math.max(body, close)), earlier: m[1], after: text.slice(end).replace(/^\s*## This round\s*/, "").trim() };
+  }
+  const first = taskBlocks(text, from)?.[0];
+  if (first && PRE_LAYOUT_RES.some((re) => re.test(text.slice(from, first.open)))) return { before, task: blockTask(text, first), earlier: null, after: null };
+  return null;
 }
 // Finished only when it says so (final F1): a turn completed and its reply ends `VERDICT: DONE` on a
 // line of its own ("I cannot give VERDICT: DONE" is not). An older round's report never counts.
 const DONE_RE = /(^|\n)[ \t]*VERDICT:[ \t]*DONE[ \t]*$/;
 // The old thread's latest turn; the messages file says per message what is left (every worker hand-off
 // has one since plan 1120 S3 r1 F2).
-function turnState(snap, threadId) {
+// `entries`: the messages file's (handoffMessages); when none is pending, a last turn without
+// `VERDICT: DONE` was a later wake, not unfinished work (final F5).
+function turnState(snap, threadId, entries) {
   const reply = snap.status === "completed" && snap.latestRunId ? (runReplies(threadId, snap.latestRunId).at(-1) ?? "").trim() : "";
   if (DONE_RE.test(reply)) return " Its last turn completed with `VERDICT: DONE`.";
-  return ` Its last turn ${snap.status === "completed" ? "ended without `VERDICT: DONE`" : `did not finish (${snap.status})`}: its work is not finished`
+  const ended = snap.status === "completed" ? "ended without `VERDICT: DONE`" : `did not finish (${snap.status})`;
+  if (entries?.length && !entries.some((e) => e.pending)) return ` Its last turn ${ended}, but that turn answered no lead message: every lead message's turn ended \`VERDICT: DONE\`.`;
+  return ` Its last turn ${ended}: its work is not finished`
     + " (its report may be from an earlier round; one ending `HANDOFF:` lists what is left).";
 }
 // The lead's messages on a thread, oldest first: user turns minus background-task notifications,
@@ -494,21 +631,29 @@ function handoffEntries(threadId) {
   const ords = asks.map(ordOf);
   return asks.map((m, i) => {
     const from = ords[i], to = Math.min(Infinity, ...ords.slice(i + 1).filter((o) => o > from));
-    let run = null, reply = "";
+    // The latest run with a reply (or not completed), else the latest; and the latest that completed
+    // with `VERDICT: DONE`. A message is done once a turn answering it ended so (final F5): a later
+    // wake (a background-task notification, no lead message) doesn't reopen it; how that wake ended is
+    // kept in the heading.
+    let run = null, reply = "", doneRun = null, latest = null;
     for (const r of runs.filter((x) => x.ordinal >= from && x.ordinal < to).reverse()) {
-      const replies = runReplies(threadId, r.run_id);
-      if (r.status !== "completed" || replies.length) { run = r; reply = (replies.at(-1) ?? "").trim(); break; }
-      run ??= r;
+      latest ??= r;
+      const replies = runReplies(threadId, r.run_id), last = (replies.at(-1) ?? "").trim();
+      if (!run && (r.status !== "completed" || replies.length)) { run = r; reply = last; }
+      if (r.status === "completed" && DONE_RE.test(last)) { doneRun = r; break; }
     }
-    const outcome = !run ? "not started" : run.status !== "completed" ? `did not finish (${run.status})`
+    run ??= latest;
+    const ended = !run ? "not started" : run.status !== "completed" ? `did not finish (${run.status})`
       : DONE_RE.test(reply) ? "completed with VERDICT: DONE" : "completed without VERDICT: DONE";
-    return { text: m.text ?? "", turn: run?.ordinal ?? null, outcome, done: outcome === "completed with VERDICT: DONE" };
+    if (!doneRun) return { text: m.text ?? "", turn: run?.ordinal ?? null, outcome: ended, done: false };
+    const outcome = run === doneRun ? ended : `completed with VERDICT: DONE (then turn ${run.ordinal}: ${ended})`;
+    return { text: m.text ?? "", turn: doneRun.ordinal, outcome, done: true };
   });
 }
-function entryText(text, task, first) {
+function entryText(text, task, first, chain) {
   const full = text, t = text.trim();
   if (task && t === task) return first ? `(the original task: ${IN_BRIEF})` : `(the lead resent the original brief: ${IN_BRIEF})`;
-  const brief = generatedBrief(full);
+  const brief = generatedBrief(full, chain);
   if (brief?.earlier) {
     const { before, after } = brief;
     return `${before ? `${before}\n\n` : ""}(a hand-off brief) Earlier lead messages: ${brief.earlier}. Its PENDING messages were handed on with this brief: they are still pending unless this message's turn ended \`VERDICT: DONE\`.`
@@ -521,22 +666,25 @@ function entryText(text, task, first) {
   if (b) return `${full.slice(0, b.open)}(the original task: ${IN_BRIEF})${full.slice(b.end)}`.trim();
   return t;
 }
-// null when the thread has no lead message.
-function handoffMessages(threadId) {
+// null when the thread has no lead message. `chain`: the job chain whose files its messages may name
+// (checkRecorded); a missing or changed one throws. `deps`: every recorded file it read (the new
+// messages file depends on them).
+function handoffMessages(threadId, chain) {
   const entries = handoffEntries(threadId);
   if (!entries.length) return null;
-  const task = (generatedBrief(entries[0].text)?.task ?? entries[0].text).trim();
+  chain.deps = new Set();
+  const task = (generatedBrief(entries[0].text, chain)?.task ?? entries[0].text).trim();
   const lastDone = entries.findLastIndex((e) => e.done);
   entries.forEach((e, i) => { e.n = i + 1; e.pending = i > lastDone; });
   const body = `# Lead messages to thread ${threadId}\n\n`
     + "Every message its lead sent it, oldest first (T3 notifications, limit resumes and the launcher's own nudges left out), each headed with the turn that answered it and how that turn ended. "
     + "PENDING marks every message after the last turn that ended `VERDICT: DONE` (all of them when none did): do those, in order.\n\n"
-    + entries.map((e, i) => `## Message ${e.n} · turn ${e.turn ?? "none"} · ${e.outcome} · ${e.pending ? "PENDING" : "done"}\n\n${entryText(e.text, task, i === 0)}\n`).join("\n");
-  return { task, entries, body };
+    + entries.map((e, i) => `## Message ${e.n} · turn ${e.turn ?? "none"} · ${e.outcome} · ${e.pending ? "PENDING" : "done"}\n\n${entryText(e.text, task, i === 0, chain)}\n`).join("\n");
+  return { task, entries, body, deps: [...chain.deps] };
 }
 function pendingLine(entries, file) {
   const pending = entries.filter((e) => e.pending).map((e) => e.n);
-  if (!pending.length) return `Every message its lead sent it is in ${file}, oldest first: all are done (its last turn ended \`VERDICT: DONE\`), so don't redo them.`;
+  if (!pending.length) return `Every message its lead sent it is in ${file}, oldest first: all are done (its last lead message's turn ended \`VERDICT: DONE\`), so don't redo them.`;
   return `Every message its lead sent it is in ${file}, oldest first, each headed with how its turn ended. Do every message marked PENDING there, in order (${pending.length === 1 ? "message" : "messages"} ${pending.join(", ")} of ${entries.length}: those after its last \`VERDICT: DONE\` turn); compare the diff with each first and keep what is already done.`;
 }
 // Written whole or not at all: a reader never sees half a file.
@@ -545,9 +693,7 @@ function writeAtomic(file, text) {
   fs.writeFileSync(tmp, text);
   fs.renameSync(tmp, file);
 }
-const recorded = (dir, threadId) => ["thread_id", "thread_ids_prev"].some((f) => {
-  try { return fs.readFileSync(path.join(dir, f), "utf8").split(/\s+/).includes(threadId); } catch { return false; }
-});
+const recorded = recordsThread;
 function stageOwner(threadId) {
   if (recorded(job, threadId)) return path.basename(job);
   const root = path.dirname(job);
@@ -606,7 +752,7 @@ async function runThread(attempt) {
       if (!reviewer) {
         msgs = handoffMessagesOrStop(attach, snap);
         state = msgs.state;
-        let k = n; while (fs.existsSync(path.join(job, `handoff-${k}-messages.md`))) k++; msgFile = path.join(job, `handoff-${k}-messages.md`);
+        msgFile = path.join(job, `handoff-${nextHandoff(job, n)}-messages.md`);
       }
       saveReport(snap, true);
       const task = msgs?.task ?? "";
@@ -615,15 +761,16 @@ async function runThread(attempt) {
         ? "The lead sent the original brief again (above, between the ORIGINAL TASK markers): finish it, after the PENDING messages."
         : prompt;
       await abandon(attach, "handoff");
-      // Only now: the file describes a thread that has handed off (a refused settle starts nothing and writes nothing).
-      if (msgs) writeAtomic(msgFile, msgs.body);
       const title = !process.env.TITLE && snap.title ? snap.title : null;
-      handoff = { from: attach, n, title,
-        text: `You take over from thread ${attach}; its last report is ${path.join(job, "report.md")}.${process.env.PLAN ? `\nPLAN: ${process.env.PLAN}` : ""}\n\n`
-          + (task || state ? `Its edits are uncommitted in the tree: read \`git status\` and \`git diff\` for its files first and keep what it finished.${state}\n\n` : "")
-          + (msgs ? `${pendingLine(msgs.entries, msgFile)} Then do this round.\n\n` : "")
-          + (task ? `Its original task, for owned files, rules and Verify commands:\n\n${wrapTask(task)}\n\n` : "")
-          + (msgs ? `${EARLIER}${msgFile}\n\n## This round\n\n${round}` : prompt) };
+      const opening = `You take over from thread ${attach}; its last report is ${path.join(job, "report.md")}.${process.env.PLAN ? `\nPLAN: ${process.env.PLAN}` : ""}\n\n`
+        + (task || state ? `Its edits are uncommitted in the tree: read \`git status\` and \`git diff\` for its files first and keep what it finished.${state}\n\n` : "")
+        + (msgs ? `${pendingLine(msgs.entries, msgFile)} Then do this round.\n\n` : "")
+        + (task ? `Its original task, for owned files, rules and Verify commands:\n\n${wrapTask(task)}\n\n` : "");
+      // Only now: the file describes a thread that has handed off (a refused settle starts nothing and
+      // writes nothing). The head, through the EARLIER line, is recorded with it (final F2).
+      const head = msgs ? `${opening}${EARLIER}${msgFile}` : null;
+      if (head) writeLauncherFile(msgFile, msgs.body, { head: headSha(head), deps: msgs.deps });
+      handoff = { from: attach, n, title, text: head ? `${head}\n\n## This round\n\n${round}` : `${opening}${prompt}` };
       if (snap.modelSelection && !process.env.EFFORT) adopt(current(snap.modelSelection));
       if (modelSelection.instanceId === claudeAccount.t3Instance) modelSelection = { ...modelSelection, instanceId: claudeAccount.t3WorkerInstance };
       attach = undefined;
