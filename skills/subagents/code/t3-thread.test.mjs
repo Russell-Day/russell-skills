@@ -618,6 +618,130 @@ const IN_BRIEF = "inlined in the hand-off brief between the ORIGINAL TASK marker
 const S2_TASK = "Implement S2: own a.py. Verify: pytest a.";
 // The old thread's turns, oldest first: { lead, reply, status = "completed", id, runless } is a user
 // message (none without `lead`) and its run; `runless` adds the message with no run (queued, never started).
+// Plan 1154 S1 (chk_7008c508015f4050). A hook appended to a home's preload (it runs after fake-t3.mjs):
+// MINT_LOG gets "<T3_API_TIMEOUT_MS> <the token CLI's timeout>" per connect; FAKE_CREATE_FAIL=refused
+// fails thread.create without T3 taking it, =landed lets T3 take it and the caller see a failure.
+const createFault = `
+{
+const fs_ = (await import("node:fs")).default;
+const child_ = (await import("node:child_process")).default;
+const realExec = child_.execFileSync;
+child_.execFileSync = function (cmd, args = [], opts) {
+  if (cmd === "t3" && args[0] === "auth" && process.env.MINT_LOG) fs_.appendFileSync(process.env.MINT_LOG, (process.env.T3_API_TIMEOUT_MS ?? "unset") + " " + opts?.timeout + "\\n");
+  return realExec.call(this, cmd, args, opts);
+};
+(await import("node:module")).syncBuiltinESMExports();
+const Base = globalThis.WebSocket;
+globalThis.WebSocket = class extends Base {
+  send(raw) {
+    const r = JSON.parse(raw);
+    const mode = process.env.FAKE_CREATE_FAIL;
+    if (!mode || r.tag !== "orchestration.dispatchCommand" || r.payload.type !== "thread.create") return super.send(raw);
+    const fail = JSON.stringify({ requestId: r.id, _tag: "Exit", exit: { _tag: "Failure", cause: [{ _tag: "Fail", error: { message: "T3 slow: connect (token) took over 120.0 s" } }] } });
+    if (mode === "landed") { const prev = this.onmessage; this.onmessage = () => prev({ data: fail }); return super.send(raw); }
+    setImmediate(() => this.onmessage?.({ data: fail }));
+  }
+};
+}`;
+const mintBudgets = (file) => fs.readFileSync(file, "utf8").trim().split("\n").map((l) => l.split(" "));
+const recordFiles = (dir) => Object.fromEntries(["thread_id", "threads", "thread_ids_prev"].map((n) => {
+  try { return [n, fs.readFileSync(path.join(dir, n), "utf8")]; } catch { return [n, null]; }
+}));
+
+test("plan 1154: a worker launch's T3 connects get 120 s unless the caller set T3_API_TIMEOUT_MS; --rename keeps 30 s", () => {
+  const saved = process.env.T3_API_TIMEOUT_MS;
+  delete process.env.T3_API_TIMEOUT_MS;
+  try {
+    const f = agyHome();
+    fs.appendFileSync(path.join(f.home, "agy-preload.mjs"), createFault);
+    const log = path.join(f.home, "mint.log");
+    ok(f.run("budget1", { MINT_LOG: log }));
+    const seen = mintBudgets(log);
+    assert.ok(seen.length >= 2, `every T3 call connects: ${seen.length}`);
+    for (const [env, ms] of seen) { assert.equal(env, "120000"); assert.ok(Number(ms) > 100000 && Number(ms) <= 120000, ms); }
+    fs.writeFileSync(log, "");
+    ok(f.run("budget2", { MINT_LOG: log, T3_API_TIMEOUT_MS: "5000" }));
+    for (const [env, ms] of mintBudgets(log)) { assert.equal(env, "5000"); assert.ok(Number(ms) > 1000 && Number(ms) <= 5000, ms); }
+    fs.writeFileSync(log, "");
+    ok(f.run("budget3", { MINT_LOG: log, T3_API_TIMEOUT_MS: "" }));
+    for (const [env, ms] of mintBudgets(log)) { assert.equal(env, "120000"); assert.ok(Number(ms) > 100000, ms); }
+    // The main-thread modes keep the 30 s default (S1 review F1: their callers' deadlines and the
+    // pacer's planning lock are sized for it); --rename stands for them.
+    fs.writeFileSync(log, "");
+    const [{ threadId }] = f.sent("thread.create");
+    const accounts = path.join(f.home, "accounts.json");
+    const env = { ...process.env, HOME: f.home, FAKE_T3: path.join(f.home, "t3.json"), MINT_LOG: log, ...(fs.existsSync(accounts) ? { ACCOUNTS_FILE: accounts } : {}) };
+    delete env.T3_API_TIMEOUT_MS;
+    ok(spawnSync(process.execPath, ["--import", fakeT3, "--import", path.join(f.home, "agy-preload.mjs"), script, "--rename", "New name", "--thread", threadId], { env, encoding: "utf8", timeout: 60000 }));
+    const seen3 = mintBudgets(log);
+    assert.ok(seen3.length >= 1, "rename connects");
+    for (const [env3, ms] of seen3) { assert.equal(env3, "unset"); assert.ok(Number(ms) <= 30000, ms); }
+  } finally { if (saved !== undefined) process.env.T3_API_TIMEOUT_MS = saved; }
+});
+
+test("plan 1154: a create T3 never took leaves a fresh job dir with no thread record; exit nonzero, run.log says so", () => {
+  const f = agyHome();
+  fs.appendFileSync(path.join(f.home, "agy-preload.mjs"), createFault);
+  const r = f.run("cf1", { FAKE_CREATE_FAIL: "refused" });
+  assert.notEqual(r.status, 0, r.stderr);
+  assert.deepEqual(f.sent("thread.create"), [], "T3 never took the create");
+  assert.deepEqual(f.sent("message.dispatch"), [], "nothing sent to a thread that doesn't exist");
+  assert.deepEqual(recordFiles(path.join(f.home, JOBS, "cf1")), { thread_id: null, threads: null, thread_ids_prev: null });
+  assert.match(f.read("cf1", "run.log"), /create failed; [0-9a-f-]{36} never existed, job dir restored: .*T3 slow: connect \(token\)/);
+});
+
+test("plan 1154: a hand-off whose new thread T3 never made keeps the job's old record byte for byte", () => {
+  const f = handoffHome(threeCompactions);
+  setTurns(f, [{ lead: "Implement S2: own a.py.", reply: `reply on ${longThread}` }]);
+  fs.appendFileSync(f.preload, createFault);
+  fs.writeFileSync(path.join(f.jobDir, "threads"), `${longThread}\n`);
+  fs.writeFileSync(path.join(f.jobDir, "thread_ids_prev"), "66666666-6666-4666-8666-666666666666\n");
+  const before = recordFiles(f.jobDir);
+  const r = f.run({ FAKE_CREATE_FAIL: "refused" });
+  assert.notEqual(r.status, 0, r.stderr);
+  assert.deepEqual(f.sent("thread.create"), [], "T3 never took the create");
+  assert.deepEqual(recordFiles(f.jobDir), before);
+  const [, id] = f.read("run.log").match(/create failed; ([0-9a-f-]{36}) never existed, job dir restored/) ?? [];
+  assert.ok(id && id !== longThread, f.read("run.log"));
+});
+
+test("plan 1154: a refused create doesn't undo another launch's record of the same JOB", () => {
+  const f = agyHome();
+  fs.appendFileSync(path.join(f.home, "agy-preload.mjs"), createFault);
+  // The other launch records its thread while this one's create is failing (outermost hook, so it runs first).
+  fs.appendFileSync(path.join(f.home, "agy-preload.mjs"), `
+{
+  const fs2 = (await import("node:fs")).default, path2 = (await import("node:path")).default;
+  const Prev = globalThis.WebSocket;
+  globalThis.WebSocket = class extends Prev {
+    send(raw) {
+      const r = JSON.parse(raw);
+      if (r.tag === "orchestration.dispatchCommand" && r.payload.type === "thread.create") {
+        const dir = path2.join(process.env.AGENT_JOBS_DIR, process.env.JOB);
+        fs2.writeFileSync(path2.join(dir, "thread_id"), "99999999-9999-4999-8999-999999999999");
+        fs2.appendFileSync(path2.join(dir, "threads"), "99999999-9999-4999-8999-999999999999\\n");
+      }
+      return super.send(raw);
+    }
+  };
+}`);
+  const r = f.run("cf3", { FAKE_CREATE_FAIL: "refused" });
+  assert.notEqual(r.status, 0, r.stderr);
+  assert.equal(f.read("cf3", "thread_id"), "99999999-9999-4999-8999-999999999999");
+  assert.match(f.read("cf3", "run.log"), /never existed, but another launch changed the job dir since, so it is kept/);
+});
+
+test("plan 1154: a create that landed though the caller saw a failure keeps the record", () => {
+  const f = agyHome();
+  fs.appendFileSync(path.join(f.home, "agy-preload.mjs"), createFault);
+  const r = f.run("cf2", { FAKE_CREATE_FAIL: "landed" });
+  assert.notEqual(r.status, 0, r.stderr);
+  const [created] = f.sent("thread.create");
+  assert.equal(f.read("cf2", "thread_id"), created.threadId);
+  assert.equal(f.read("cf2", "threads"), `${created.threadId}\n`);
+  assert.ok(f.read("cf2", "run.log").includes(`create failed but ${created.threadId} exists; job dir kept`), f.read("cf2", "run.log"));
+});
+
 function setTurns(f, turns) {
   const d = f.db();
   d.runs = []; d.messages = [];

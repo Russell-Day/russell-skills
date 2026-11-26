@@ -192,6 +192,14 @@ function parseDuration(s) {
 let modelSelection = selection(model);
 const timeoutMs = parseDuration(process.env.TIMEOUT ?? "45m");
 const JOBS_ROOT = path.resolve(process.env.AGENT_JOBS_DIR ?? path.join(home, ".local/state/agent-jobs"));
+// Plan 1154 (chk_7008c508015f4050): every T3 call opens its own connect, and the connect budget
+// (`t3 auth session issue` start-up, the ticket, the socket) is T3_API_TIMEOUT_MS, 30 s by default
+// so the timers don't pile up. Under load (load avg 32) the token CLI alone took over 30 s twice and
+// a review launch failed; 120 s worked at once. A worker or reviewer launch waits minutes for its
+// turn anyway, so it raises the budget for itself and the scripts it starts (usage.mjs). Only here:
+// the modes above (--orchestrator, --attach, --rename) run under callers' deadlines and the pacer's
+// planning lock, which are sized for 30 s connects (plan 1154 S1 review F1). A caller's positive value wins.
+if (!(Number(process.env.T3_API_TIMEOUT_MS) > 0)) process.env.T3_API_TIMEOUT_MS = "120000";
 const job = path.join(JOBS_ROOT,
   process.env.JOB ?? `${new Date().toISOString().replace(/[-:]/g, "").slice(0, 15)}-${model}-t3`);
 { const bad = jobDirProblem(job); if (bad) { console.error(`job dir ${JSON.stringify(job)} ${bad}: hand-offs read its files only there (pick a JOB that is one plain name)`); process.exit(2); } }
@@ -352,6 +360,32 @@ async function abandon(threadId, why) {
     console.log(job);
     process.exit(1);
   }
+}
+
+// Plan 1154: a create that fails must not leave the job dir naming a thread T3 never made (prune and
+// settle would chase it, and a CONTINUE would send to it). The record is still written before the
+// create (so nothing sees the new thread as a main thread); these keep what it was, and put it back
+// when T3 has no such thread after the failure. A thread that does exist (the create landed, its reply
+// was slow) or a check that fails keeps the record.
+const JOB_RECORD = ["thread_id", "threads", "thread_ids_prev"];
+const readRecord = () => Object.fromEntries(JOB_RECORD.map((f) => {
+  try { return [f, fs.readFileSync(path.join(job, f))]; } catch { return [f, null]; }
+}));
+// `mine` is the record right after this launch wrote it: when it has changed since (another launch
+// of the same JOB recorded its own thread meanwhile), the record is that launch's and stays.
+const sameRecord = (a, b) => JOB_RECORD.every((f) => (a[f] === null ? b[f] === null : b[f] !== null && a[f].equals(b[f])));
+function undoRecordIfNoThread(threadId, before, mine, err) {
+  const why = String(err?.message ?? err).split("\n")[0];
+  let exists;
+  try { exists = Boolean(getThread(threadId)); }
+  catch (e) { log(`create failed; couldn't check whether ${threadId} exists (${String(e?.message ?? e)}), job dir kept: ${why}`); return; }
+  if (exists) { log(`create failed but ${threadId} exists; job dir kept: ${why}`); return; }
+  if (!sameRecord(mine, readRecord())) { log(`create failed; ${threadId} never existed, but another launch changed the job dir since, so it is kept: ${why}`); return; }
+  for (const [f, buf] of Object.entries(before)) {
+    const file = path.join(job, f);
+    if (buf === null) fs.rmSync(file, { force: true }); else fs.writeFileSync(file, buf);
+  }
+  log(`create failed; ${threadId} never existed, job dir restored: ${why}`);
 }
 
 // `thread_id` holds the latest thread; `threads` every one this job opened (retries included).
@@ -805,9 +839,12 @@ async function runThread(attempt) {
   } else {
     // Recorded before the thread exists, so nothing ever sees it as a main thread.
     budgetGate();
+    const before = readRecord();
     recordThread(threadId);
     if (handoff && attempt === 1) fs.appendFileSync(path.join(job, "thread_ids_prev"), `${handoff.from}\n`);
-    await createThread({ threadId, projectId: project[0], title, modelSelection });
+    const mine = readRecord();
+    try { await createThread({ threadId, projectId: project[0], title, modelSelection }); }
+    catch (err) { undoRecordIfNoThread(threadId, before, mine, err); throw err; }
     await sendMessage(threadId, handoff?.text ?? prompt, { mode: "start", modelSelection, label: `subagent ${path.basename(job)}` });
     sent = true;
     budgetCount();
