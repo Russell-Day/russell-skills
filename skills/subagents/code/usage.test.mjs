@@ -62,3 +62,42 @@ test("a Claude provider with no probe object and no logs is left out, not invent
   const out = usage([{ instanceId: "claudeAgent_main", usageLimits: undefined }, { instanceId: "claudeAgent", usageLimits: null }]);
   assert.deepEqual(out.map((a) => a.instance), []);
 });
+
+// --pick-codex against fake providers (the test accounts: main, second, spare = reserve); every account has gpt-6.2-sol.
+function pick(providers, args, setup = null) {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "usage-pick-"));
+  fs.mkdirSync(path.join(home, ".t3/userdata/logs/provider"), { recursive: true });
+  fs.writeFileSync(path.join(home, ".t3/userdata/server-runtime.json"), JSON.stringify({ port: 1 }));
+  fs.writeFileSync(path.join(home, "t3.json"), JSON.stringify({ projects: [], threads: [], runs: [], messages: [], commands: [], providers }));
+  for (const h of [".codex", ".codex_second", ".codex_spare"]) {
+    fs.mkdirSync(path.join(home, h));
+    fs.writeFileSync(path.join(home, h, "models_cache.json"), JSON.stringify({ models: [{ slug: "gpt-6.2-sol" }] }));
+  }
+  setup?.(home);
+  const r = spawnSync(process.execPath, ["--import", fakeT3, path.join(here, "usage.mjs"), "--cached", "--no-agy", ...args],
+    { env: { ...process.env, HOME: home, FAKE_T3: path.join(home, "t3.json") }, encoding: "utf8", timeout: 60000 });
+  return { status: r.status, out: r.stdout.trim(), err: r.stderr };
+}
+const marks = (home) => path.join(home, ".local/state/agent-stats/codex_signed_out");
+function setMark(home, name, dir) {
+  fs.mkdirSync(marks(home), { recursive: true });
+  fs.writeFileSync(path.join(marks(home), `${name}.json`), JSON.stringify({ at: new Date(Date.now() - 60000).toISOString(), home: path.join(home, dir), error: "refresh token has expired" }));
+}
+
+test("pick-codex: a signed-out account (codex-login.mjs) is skipped; a login after the mark brings it back and ends the mark", () => {
+  const soon = new Date(Date.now() + 3600e3).toISOString(), later = new Date(Date.now() + 3 * 864e5).toISOString();
+  const providers = [probe("codex", [{ label: "Weekly", usedPercent: 10, resetsAt: soon }]), probe("codex_second", [{ label: "Weekly", usedPercent: 10, resetsAt: later }]),
+    probe("codex_spare", [{ label: "Weekly", usedPercent: 10, resetsAt: soon }])];
+  const args = ["--pick-codex", "gpt-6.2-sol"];
+  assert.equal(pick(providers, args).out, "main");
+  const skipped = pick(providers, args, (h) => setMark(h, "main", ".codex"));
+  assert.equal(skipped.out, "second");
+  assert.match(skipped.err, /codex account main skipped: signed out since .* \(run CODEX_HOME=.*\/\.codex codex login\)/);
+  assert.equal(pick(providers, args, (h) => { setMark(h, "main", ".codex"); setMark(h, "second", ".codex_second"); }).out, "spare");
+  let home;
+  assert.equal(pick(providers, args, (h) => { home = h; setMark(h, "main", ".codex"); fs.writeFileSync(path.join(h, ".codex/auth.json"), "{}"); }).out, "main");
+  assert.equal(fs.existsSync(path.join(marks(home), "main.json")), false, "the stale mark is removed");
+  const all = pick(providers, args, (h) => { setMark(h, "main", ".codex"); setMark(h, "second", ".codex_second"); setMark(h, "spare", ".codex_spare"); });
+  assert.equal(all.status, 3);
+});
+

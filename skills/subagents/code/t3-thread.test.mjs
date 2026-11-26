@@ -94,13 +94,17 @@ test("--orchestrator: bad args exit 2 and send nothing", () => {
 // FAKE_LIMIT_INSTANCE Codex instance fail on a usage limit. The board is a stub script.
 const agyPreload = `
 import child from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
 import { syncBuiltinESMExports } from "node:module";
-// FAKE_PICKS=a,b: usage.mjs --pick-codex returns the first name not in --exclude.
+// FAKE_PICKS=a,b: usage.mjs --pick-codex returns the first name not in --exclude and not signed out
+// (codex-login.mjs's mark file, as usage.mjs skips it; FAKE_PICKS_RAW=1 ignores the marks).
 const prev = child.execFileSync;
 child.execFileSync = function (cmd, args = [], opts) {
   if (process.env.FAKE_PICKS && args.includes("--pick-codex")) {
     const excluded = (args[args.indexOf("--exclude") + 1] ?? "").split(",");
-    const name = process.env.FAKE_PICKS.split(",").find((n) => !excluded.includes(n));
+    const marked = (n) => !process.env.FAKE_PICKS_RAW && fs.existsSync(path.join(process.env.HOME, ".local/state/agent-stats/codex_signed_out", n + ".json"));
+    const name = process.env.FAKE_PICKS.split(",").find((n) => !excluded.includes(n) && !marked(n));
     if (!name) throw new Error("no account left");
     return Buffer.from(name + "\\n");
   }
@@ -117,6 +121,9 @@ globalThis.fakeT3Outcome = (thread, command, db) => {
       db.runs.push({ run_id: "queued:" + thread.thread_id, thread_id: thread.thread_id, ordinal: 99, status: "queued", requested_at: new Date().toISOString(), completed_at: null });
     return { error: { class: "usage_limit", message: process.env.FAKE_LIMIT_TEXT ?? "You've hit your usage limit." } };
   }
+  // FAKE_AUTH_INSTANCE: runs there fail on a dead Codex login, in the provider's words.
+  if (instance && instance === process.env.FAKE_AUTH_INSTANCE)
+    return { error: { class: "provider_error", message: "Your access token could not be refreshed because your refresh token has expired. Please log out and sign in again." } };
   if (process.env.FAKE_AGY === "quota" && instance === "antigravity")
     return { error: { class: "provider_error", message: "Individual quota reached. Please upgrade your subscription to increase your limits. Resets in 10h5m0s." } };
   return {};
@@ -143,7 +150,7 @@ function agyHome({ state, threads = [], runs = [], items = [] } = {}) {
   fs.writeFileSync(path.join(home, "prompt.md"), "look something up");
   const env = { ...process.env, HOME: home, FAKE_T3: db, AGENT_JOBS_DIR: path.join(home, JOBS), PROJECT_ROOT: PROJECT, NO_SETTLE: "1",
     MESSAGE_BOARD_SCRIPT: path.join(home, "board-ok.py") };
-  for (const k of ["CLAUDE_CODE_SESSION_ID", "CODEX_SESSION_ID", "CODEX_THREAD_ID", "TITLE", "JOB", "ATTACH", "CONTINUE", "EFFORT", "FAKE_AGY", "ACCOUNT", "FAKE_PICKS", "FAKE_LIMIT_INSTANCE", "FAKE_LIMIT_MODEL", "FAKE_LIMIT_TEXT", "FAKE_QUEUE_AFTER_LIMIT", "FAKE_SETTLE_REFUSE"]) delete env[k];
+  for (const k of ["CLAUDE_CODE_SESSION_ID", "CODEX_SESSION_ID", "CODEX_THREAD_ID", "TITLE", "JOB", "ATTACH", "CONTINUE", "EFFORT", "FAKE_AGY", "ACCOUNT", "FAKE_PICKS", "FAKE_LIMIT_INSTANCE", "FAKE_LIMIT_MODEL", "FAKE_LIMIT_TEXT", "FAKE_QUEUE_AFTER_LIMIT", "FAKE_SETTLE_REFUSE", "FAKE_AUTH_INSTANCE", "FAKE_PICKS_RAW", "CODEX_LOGIN_STATE_DIR"]) delete env[k];
   const jobDir = (job) => path.join(home, JOBS, job);
   const read = (job, f) => { try { return fs.readFileSync(path.join(jobDir(job), f), "utf8"); } catch { return ""; } };
   return {
@@ -338,6 +345,85 @@ test("ACCOUNT=auto Codex retry: each attempt records its own account", () => {
   assert.deepEqual(f.sent("thread.settle").map((c) => c.threadId), [created[0].threadId], "the limited thread is settled; NO_SETTLE keeps the last");
   const types = f.sent().map((c) => c.type);
   assert.ok(types.indexOf("thread.settle") < types.lastIndexOf("thread.create"), `settled before the retry starts: ${types}`);
+});
+
+// A Codex account whose login expired is marked signed out (codex-login.mjs), skipped until a
+// login or a good run, and the launch goes on (auto mode) or stops with the login hint (pinned).
+function signOutHome() {
+  const f = agyHome();
+  const marks = path.join(f.home, ".local/state/agent-stats/codex_signed_out");
+  return Object.assign(f, {
+    mark: (name) => { try { return JSON.parse(fs.readFileSync(path.join(marks, `${name}.json`), "utf8")); } catch { return null; } },
+    setMark: (name) => {
+      fs.mkdirSync(marks, { recursive: true });
+      fs.writeFileSync(path.join(marks, `${name}.json`), JSON.stringify({ at: new Date().toISOString(), home: codexAccounts.find((a) => a.name === name).home.replace(os.homedir(), f.home), error: "refresh token has expired" }));
+    },
+  });
+}
+const homeOf = (f, a) => path.join(f.home, path.relative(os.homedir(), a.home));
+
+test("signed out, auto mode: the account is marked, the launch goes on to the next one, the next launch skips it", () => {
+  const f = signOutHome();
+  const env = { ACCOUNT: "auto", FAKE_PICKS: `${dflt.name},${other.name}`, FAKE_AUTH_INSTANCE: dflt.t3Instance };
+  const r = ok(f.run("so1", env, "sol62"));
+  const created = f.sent("thread.create");
+  assert.deepEqual(created.map((c) => c.modelSelection.instanceId), [dflt.t3Instance, other.t3Instance]);
+  assert.deepEqual(f.attempts("so1").map((a) => [a.account, a.exit]), [[dflt.name, 1], [other.name, 0]]);
+  assert.equal(f.read("so1", "thread_id").trim(), created[1].threadId);
+  const mark = f.mark(dflt.name);
+  assert.equal(mark.home, homeOf(f, dflt));
+  assert.match(mark.error, /refresh token has expired/);
+  for (const file of ["run.log", "limits.log"]) assert.match(f.read("so1", file), new RegExp(`codex account ${dflt.name} signed out \\(Your access token could not be refreshed.*trying the next account`));
+  assert.match(r.stderr, new RegExp(`codex account ${dflt.name} marked signed out`));
+  assert.deepEqual(f.sent("thread.settle").map((c) => c.threadId), [created[0].threadId]);
+  ok(f.run("so2", env, "sol62"));
+  assert.deepEqual(f.attempts("so2").map((a) => [a.account, a.exit]), [[other.name, 0]]);
+});
+
+test("signed out, pinned ACCOUNT: exit nonzero with the login hint; the next launch fails before any thread; a login clears it", () => {
+  const f = signOutHome();
+  const hint = new RegExp(`codex account ${dflt.name} is signed out: run CODEX_HOME=${homeOf(f, dflt)} codex login`);
+  const r = f.run("pin1", { ACCOUNT: dflt.name, FAKE_AUTH_INSTANCE: dflt.t3Instance }, "sol62");
+  assert.notEqual(r.status, 0);
+  assert.match(r.stderr, hint);
+  assert.match(f.read("pin1", "limits.log"), hint);
+  assert.equal(f.sent("thread.create").length, 1);
+  const r2 = f.run("pin2", { ACCOUNT: dflt.name }, "sol62");
+  assert.notEqual(r2.status, 0);
+  assert.match(r2.stderr, hint);
+  assert.equal(f.sent("thread.create").length, 1, "nothing created for a known sign-out");
+  const auth = path.join(homeOf(f, dflt), "auth.json");
+  fs.mkdirSync(path.dirname(auth), { recursive: true });
+  fs.writeFileSync(auth, "{}");
+  fs.utimesSync(auth, new Date(Date.now() + 5000), new Date(Date.now() + 5000));
+  ok(f.run("pin3", { ACCOUNT: dflt.name }, "sol62"));
+  assert.deepEqual(f.attempts("pin3").map((a) => [a.account, a.exit]), [[dflt.name, 0]]);
+  assert.equal(f.mark(dflt.name), null);
+});
+
+test("signed out: a good run on a marked account clears the mark; with no picker answer the fallback account still gets the attempt", () => {
+  const f = signOutHome();
+  f.setMark(other.name);
+  ok(f.run("good", { ACCOUNT: "auto", FAKE_PICKS: other.name, FAKE_PICKS_RAW: "1" }, "sol62"));
+  assert.equal(f.mark(other.name), null);
+  assert.match(f.read("good", "run.log"), new RegExp(`codex account ${other.name} ran: sign-out mark cleared`));
+  // usage.mjs has no answer before any try: the fallback account gets the attempt even when marked
+  // (it fails at once and the go-around ends the launch), not some other account.
+  const fallback = codexAccounts.find((a) => a.reserve) ?? dflt;
+  f.setMark(fallback.name); f.setMark(dflt.name);
+  const r = f.run("fb", { ACCOUNT: "auto", FAKE_PICKS: dflt.name, FAKE_AUTH_INSTANCE: fallback.t3Instance }, "sol62");
+  assert.notEqual(r.status, 0);
+  assert.deepEqual(f.attempts("fb").map((a) => [a.account, a.exit]), [[fallback.name, 1]]);
+  assert.match(r.stderr, /every Codex account is at its limit or signed out/);
+});
+
+test("signed out: a pinned signed-out account at startup exits 1 with the hint, no stack trace", () => {
+  const f = signOutHome();
+  f.setMark(dflt.name);
+  const r = f.run("pin-start", { ACCOUNT: dflt.name }, "sol62");
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, new RegExp(`codex account ${dflt.name} is signed out: run CODEX_HOME=`));
+  assert.doesNotMatch(r.stderr, /\n\s+at /, "no stack trace");
 });
 
 test("limit fallback: a message queued behind the limit is removed, the thread settled, then the retry starts", () => {

@@ -17,7 +17,8 @@ import fs from "node:fs";
 import os from "node:os";
 import { applyClaudeLogs, claudeHomes, latestClaudeWindows } from "./claude-logs.mjs";
 import { addHubUsage } from "./hub-usage.mjs";
-import { codexAccount, pickCodex } from "./accounts.mjs";
+import { codexAccount, codexAccounts, pickCodex } from "./accounts.mjs";
+import { signedOut } from "./codex-login.mjs";
 import { t3Connect } from "./t3-api.mjs";
 
 let conn;
@@ -55,12 +56,18 @@ await addHubUsage(accounts, claudeHomes());
 
 // --pick-codex <model-id> [--exclude a,b]: print the Codex account to use
 // (rules in accounts.mjs pickCodex). Accounts that already hit a limit this
-// run are excluded.
+// run are excluded, and so is an account whose login expired (codex-login.mjs)
+// until it is signed in again.
 const pickAt = process.argv.indexOf("--pick-codex");
 if (pickAt !== -1) {
   const modelId = process.argv[pickAt + 1];
   const exAt = process.argv.indexOf("--exclude");
   const excluded = new Set(exAt === -1 ? [] : (process.argv[exAt + 1] ?? "").split(",").filter(Boolean));
+  for (const { name } of codexAccounts) {
+    let mark = null;
+    try { mark = !excluded.has(name) && signedOut(name); } catch {}
+    if (mark) { excluded.add(name); console.error(`codex account ${name} skipped: signed out since ${mark.at} (run CODEX_HOME=${mark.home} codex login)`); }
+  }
   const hasModel = (name) => {
     try {
       const data = JSON.parse(fs.readFileSync(`${codexAccount(name).home}/models_cache.json`, "utf8"));

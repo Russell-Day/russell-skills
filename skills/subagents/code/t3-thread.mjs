@@ -62,7 +62,8 @@ import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { claude as claudeAccount, codexAccount as codexAccountByName, codexByInstance, codexDefault, codexFallback } from "./accounts.mjs";
+import { claude as claudeAccount, codexAccount as codexAccountByName, codexAccounts, codexByInstance, codexDefault, codexFallback } from "./accounts.mjs";
+import { codexLoginRe, loginHint, loginOk as codexLoginOk, markSignedOut, signedOut } from "./codex-login.mjs";
 import { agyOutUntil, noticeOnce, recordQuotaError } from "./agy-state.mjs";
 import { abandonThread, compactionCount as compactions, createMainThread, createThread, currentThread, getThread, interruptThread, mainModelSelection, orchestratorArgs, projectFor, renameThread, runReplies, sendMessage, settleThread, t3Query, workerThreadTitle } from "./t3-api.mjs";
 
@@ -128,15 +129,25 @@ const rootCandidates = projectRoots();
 // ACCOUNT=auto: non-reserve accounts first, soonest weekly reset first; reserve
 // accounts last (see usage.mjs --pick-codex). `tried` holds accounts that
 // already hit a limit this run.
+// An account whose login expired is marked in codex-login.mjs: usage.mjs skips it in auto mode, a
+// pinned ACCOUNT fails with the login hint, and the mark clears on the next login or a good run.
 const autoAccount = (process.env.ACCOUNT ?? codexDefault) === "auto";
 const tried = [];
+const codexHome = (name) => codexAccountByName(name)?.home ?? "";
+const signedOutMark = (name) => { try { return signedOut(name); } catch { return null; } };
 function codexAccount(modelId) {
-  if (!autoAccount) return process.env.ACCOUNT ?? codexDefault;
+  if (!autoAccount) {
+    const name = process.env.ACCOUNT ?? codexDefault;
+    if (signedOutMark(name)) throw new Error(loginHint(name, codexHome(name)));
+    return name;
+  }
   try {
     return execFileSync("node", [path.join(here, "usage.mjs"), "--pick-codex", modelId, "--exclude", tried.join(",")],
       { stdio: ["ignore", "pipe", "ignore"] }).toString().trim();
   } catch {
-    if (tried.length) throw new Error("every Codex account is at its limit");
+    if (tried.length) throw new Error("every Codex account is at its limit or signed out");
+    // No answer (no usage data, or no account has room): the fallback account, even when it is marked
+    // signed out; its attempt fails at once and the go-around ends the launch.
     return codexFallback;
   }
 }
@@ -189,7 +200,9 @@ function parseDuration(s) {
   return Number(m[1]) * { "": 60, s: 1, m: 60, h: 3600 }[m[2]] * 1000;
 }
 
-let modelSelection = selection(model);
+// A pick that can't start (a pinned account signed out) says why and stops, with no stack trace.
+let modelSelection;
+try { modelSelection = selection(model); } catch (e) { console.error(e.message); process.exit(1); }
 const timeoutMs = parseDuration(process.env.TIMEOUT ?? "45m");
 const JOBS_ROOT = path.resolve(process.env.AGENT_JOBS_DIR ?? path.join(home, ".local/state/agent-jobs"));
 // Plan 1154 (chk_7008c508015f4050): every T3 call opens its own connect, and the connect budget
@@ -954,11 +967,30 @@ for (let attempt = 1; attempt <= 3; attempt++) {
   recordAttempt(start, rc, threadId);
   const lastReply = thread?.latestRunId ? runReplies(threadId, thread.latestRunId).at(-1) ?? "" : "";
   const errorText = `${thread?.lastError ?? ""}\n${lastReply}`;
-  if (rc === 0 || !(thread?.lastErrorClass === "usage_limit" || limitRe.test(errorText))) break;
   const isCodex = !!codexByInstance(modelSelection.instanceId);
+  // A good run ends a sign-out mark; a dead login (the provider's own error, never the reply)
+  // marks the account and goes around like a limit (auto mode), or stops with the login hint.
+  // Only a turn this launch ran marks or clears: a re-poll (ATTACH without CONTINUE) reads an old turn.
+  const ranTurn = !(attempt === 1 && process.env.ATTACH && !process.env.CONTINUE);
+  if (rc === 0 && isCodex && codexName && ranTurn) { try { if (codexLoginOk(codexName)) log(`codex account ${codexName} ran: sign-out mark cleared`); } catch {} }
+  const loggedOut = rc !== 0 && isCodex && !!codexName && codexLoginRe.test(thread?.lastError ?? "");
+  if (rc === 0 || !(loggedOut || thread?.lastErrorClass === "usage_limit" || limitRe.test(errorText))) break;
   const who = isCodex ? codexName : modelSelection.model;
-  log("limit reached on", who);
-  console.error(`limit reached on ${who} (attempt ${attempt})`);
+  if (loggedOut) {
+    const line = `codex account ${codexName} signed out (${thread.lastError.split("\n")[0].trim().slice(0, 200)}); ${autoAccount ? "trying the next account" : "ACCOUNT is pinned"}`;
+    console.error(line); log(line); fs.appendFileSync(path.join(job, "limits.log"), `${line}\n`);
+    let said = `codex account ${codexName}: an earlier turn, not marked`;
+    if (ranTurn) try { said = markSignedOut(codexName, codexHome(codexName), thread.lastError); } catch (e) { said = `codex account ${codexName}: sign-out mark failed: ${e.message}`; }
+    console.error(said); log(said);
+    if (!autoAccount) {
+      const hint = loginHint(codexName, codexHome(codexName));
+      console.error(hint); log(hint); fs.appendFileSync(path.join(job, "limits.log"), `${hint}\n`);
+      break;
+    }
+  } else {
+    log("limit reached on", who);
+    console.error(`limit reached on ${who} (attempt ${attempt})`);
+  }
   const overflowTo = claudeAccount.overflow[modelSelection.instanceId];
   if (overflowTo) {
     // The main Claude account's limit: the same model reruns on the overflow account, before any
@@ -994,7 +1026,7 @@ for (let attempt = 1; attempt <= 3; attempt++) {
   // Without a fallback the limited thread is the job's result, settled as usual below.
   if (attempt === 3) break;
   saveReport(thread);
-  await abandon(threadId, "usage limit");
+  await abandon(threadId, loggedOut ? "signed out" : "usage limit");
 }
 
 // A provider-error turn isn't a review round (plan 1120 S3b: a recheck killed by a "cybersecurity

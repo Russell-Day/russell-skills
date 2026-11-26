@@ -80,6 +80,11 @@ Codex on the account named by `codex.default`. **Auto-pick** is opt-in: with
   `claude.overflow`, main instance -> second account's), when one is set.
 - **Codex (auto mode)** retries on the next account, up to three. A pinned
   `ACCOUNT` fails instead.
+- **Codex signed out** (its login expired): the account is marked
+  (`code/codex-login.mjs`) and auto mode goes on to the next account; picks
+  skip it (only when the picker has no answer does the fallback account still
+  get one try) until `CODEX_HOME=<home> codex login` (the mark then clears itself).
+  `node code/codex-login.mjs list` shows marks; `ok <name>` clears a wrong one.
 - **Fable** falls back to Opus.
 - **AGY (gemini-flash)** reruns the same prompt on Haiku high.
 - **Opus** past the overflow (or with none set) fails. Wait for the reset or
