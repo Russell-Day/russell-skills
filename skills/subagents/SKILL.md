@@ -309,8 +309,9 @@ families (Claude, Codex, Gemini, and future routes), with complete technical
 substance and required verdicts. Orchestrators keep their normal style.
 Code, commits, PRs, and user-facing content stay in normal language.
 
-Claude orchestrators use the T3 profile `claude.t3Instance` from
-`accounts.local.json`, with a **300K auto-compact window**. Workers use
+Claude orchestrators use the T3 profile `claude.t3OrchInstance` from
+`accounts.local.json` (default `claude.t3Instance`, which stays the user's own
+threads' profile), with a **300K auto-compact window**. Workers use
 `claude.t3WorkerInstance` with **200K**; both share one Claude config dir and
 quota. `t3-thread.mjs` selects the worker profile for new and continued workers. `run.sh` sets
 `CLAUDE_CODE_AUTO_COMPACT_WINDOW=200000` for headless Claude workers.

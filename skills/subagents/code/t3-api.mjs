@@ -575,12 +575,28 @@ export async function detachSession(threadId, providerSessionId, reason, send = 
 
 // --- Main threads --------------------------------------------------------------------------
 
-// Claude models a main (orchestrator) thread can run, on the orchestrator profile.
+// Claude models a main thread can run. mainModelSelection is the user's own main thread
+// (claude.t3Instance: a project launcher, a New thread); orchModelSelection is a main thread a
+// script starts for an agent (an orchestrate lead, a triage pass, the pacer's emergency thread),
+// on claude.t3OrchInstance (the orchestrator profile; t3Instance when none is set).
 const mainModels = { opus: "claude-opus-5-5", fable: "claude-fable-5-2", sonnet: "claude-sonnet-5-5", haiku: "claude-haiku-5-5" };
 export function mainModelSelection(model = "opus", effort = "high") {
   const id = mainModels[model];
   if (!id) throw new Error(`--model is ${Object.keys(mainModels).join(", ")}`);
   return { instanceId: claudeAccount.t3Instance, model: id, options: [{ id: "effort", value: effort }, ...(model === "opus" ? [{ id: "fastMode", value: false }] : [])] };
+}
+export function orchModelSelection(model = "opus", effort = "high", account = claudeAccount) {
+  return { ...mainModelSelection(model, effort), instanceId: account.t3OrchInstance ?? account.t3Instance };
+}
+// An agent's main thread about to be created (a queued start saved before the orchestrator
+// instance existed, a lead's hand-off): its account's lead instance -> that account's orchestrator
+// instance, same model and options. The user's own threads (role "own") and every other instance
+// keep theirs, so a thread of his never lands on the orchestrator profile.
+export function asOrchSelection(sel, role = "orchestrator", account = claudeAccount) {
+  if (!sel?.instanceId || role === "own") return sel;
+  const to = [[account.t3Instance, account.t3OrchInstance], [account.second?.t3Instance, account.second?.t3OrchInstance]]
+    .find(([from, orch]) => from && orch && from === sel.instanceId)?.[1];
+  return to ? { ...sel, instanceId: to } : sel;
 }
 
 // A main thread on the default Codex account: a fallback when the Claude

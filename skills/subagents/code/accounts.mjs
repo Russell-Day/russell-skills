@@ -30,6 +30,10 @@ export const claude = {
   configDir: expand(raw.claude.configDir),
   t3Instance: raw.claude.t3Instance,
   t3WorkerInstance: raw.claude.t3WorkerInstance ?? raw.claude.t3Instance,
+  // Instance for main threads a script starts for an agent (orchestrate leads, triage passes, the
+  // pacer's emergency thread): a profile with a smaller tool and skill set. Default t3Instance,
+  // which stays the user's own threads' instance. `second.t3OrchInstance` is the second account's.
+  t3OrchInstance: raw.claude.t3OrchInstance ?? raw.claude.t3Instance,
   // Instance whose usage probe the pacer reads (default t3Instance): another instance on the same login.
   usageInstance: raw.claude.usageInstance ?? raw.claude.t3Instance,
   t3HaikuInstance: raw.claude.t3HaikuInstance ?? null,

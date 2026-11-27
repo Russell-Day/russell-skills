@@ -3,6 +3,7 @@
     "setup": "Copy to accounts.local.json (git-ignored) and fill in this machine's accounts. Scripts read accounts.local.json, else this file. A leading ~/ means your home directory.",
     "claude.configDir": "CLAUDE_CONFIG_DIR for headless Claude workers (run.sh).",
     "claude.t3Instance": "T3 provider instance your Claude orchestrator threads use.",
+    "claude.t3OrchInstance": "Optional T3 instance for main threads scripts start for an agent (t3-thread.mjs --orchestrator, the pacer's triage and emergency threads), e.g. one whose launchArgs carry a smaller --settings profile. Default t3Instance, which stays your own threads' instance. claude.second.t3OrchInstance is the second account's.",
     "claude.t3WorkerInstance": "T3 instance for Claude workers (a profile with a smaller auto-compact window). Same as t3Instance if you have only one.",
     "claude.overflow": "Optional second Claude account for the pacer: { \"<main T3 instance>\": \"<overflow T3 instance>\" }. A thread the main account's 5 h limit stops moves to the overflow instance and continues; at the main reset it moves back. Leave out (or {}) to turn it off.",
     "codex.default": "Codex account name used when ACCOUNT is unset.",

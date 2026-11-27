@@ -65,7 +65,7 @@ import path from "node:path";
 import { claude as claudeAccount, codexAccount as codexAccountByName, codexAccounts, codexByInstance, codexDefault, codexFallback } from "./accounts.mjs";
 import { codexLoginRe, loginHint, loginOk as codexLoginOk, markSignedOut, signedOut } from "./codex-login.mjs";
 import { agyOutUntil, noticeOnce, recordQuotaError } from "./agy-state.mjs";
-import { abandonThread, compactionCount as compactions, createMainThread, createThread, currentThread, getThread, interruptThread, mainModelSelection, orchestratorArgs, projectFor, renameThread, runReplies, sendMessage, settleThread, t3Query, workerThreadTitle } from "./t3-api.mjs";
+import { abandonThread, compactionCount as compactions, createMainThread, createThread, currentThread, getThread, interruptThread, orchModelSelection, orchestratorArgs, projectFor, renameThread, runReplies, sendMessage, settleThread, t3Query, workerThreadTitle } from "./t3-api.mjs";
 
 // The launcher's own nudges (see awaitAnswer), exact text: a hand-off's messages file leaves them out
 // (plan 1120 S3). `--nudges` prints them as JSON (the tests read them from here instead of retyping them).
@@ -109,7 +109,7 @@ if (process.argv[2] === "--orchestrator") {
   const text = fs.readFileSync(a.briefFile, "utf8");
   const threadId = randomUUID();
   try {
-    await createMainThread({ threadId, messageId: randomUUID(), projectId: projectFor(projectRoots()), title: a.title, text, modelSelection: mainModelSelection(a.model, a.effort), role: "orchestrator" });
+    await createMainThread({ threadId, messageId: randomUUID(), projectId: projectFor(projectRoots()), title: a.title, text, modelSelection: orchModelSelection(a.model, a.effort), role: "orchestrator" });
   } catch (e) { console.error(`orchestrator thread ${threadId}: ${e.message}`); process.exit(1); }
   console.log(threadId);
   process.exit(0);

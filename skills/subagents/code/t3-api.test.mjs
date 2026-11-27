@@ -15,7 +15,7 @@ const JOBS_TMP = fs.mkdtempSync(path.join(os.tmpdir(), "t3-api-jobs-"));
 process.env.AGENT_JOBS_DIR = JOBS_TMP;
 const registryLines = () => { try { return fs.readFileSync(mainThreadsFile(), "utf8").trim().split("\n").filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
 const withoutAt = (lines) => lines.map(({ at, ...l }) => l);
-import { abandonThread, busyProviderSelection, conversationInstance, createMainThread, currentThread, mainThreadRoles, mainThreadsFile, recordMainThread, recordMissingMainThread, getThread, interruptThread, isWorker, jobThreadIds, mainModelSelection, orchestratorArgs, projectFor, renameThread, sendMessage, snoozeThread, t3TokenFrom, workerThreadTitle } from "./t3-api.mjs";
+import { abandonThread, busyProviderSelection, conversationInstance, createMainThread, currentThread, mainThreadRoles, mainThreadsFile, recordMainThread, recordMissingMainThread, getThread, interruptThread, isWorker, jobThreadIds, asOrchSelection, mainModelSelection, orchModelSelection, orchestratorArgs, projectFor, renameThread, sendMessage, snoozeThread, t3TokenFrom, workerThreadTitle } from "./t3-api.mjs";
 
 test("TITLE worker: the title is the fix (with a model hint), never \"[model] job\"", () => {
   assert.equal(workerThreadTitle({ model: "opus", job: "p65-s3-impl", title: "Board lanes, priority tags" }), "[opus] Board lanes, priority tags");
@@ -476,4 +476,18 @@ test("t3Connect: T3_SESSION_TOKEN skips the CLI and keeps tokenRejected on 401",
   const r = JSON.parse(stdout);
   assert.equal(r.tokenRejected, true);
   assert.match(r.message, /^T3 token rejected/);
+});
+
+test("orchModelSelection / asOrchSelection: agent-started leads go to the orchestrator instance, Russell's own stay (plan 1008 S2)", () => {
+  const acct = { t3Instance: "mei", t3OrchInstance: "mei_orch", second: { t3Instance: "ultra", t3OrchInstance: "ultra_orch" } };
+  const main = mainModelSelection("opus", "high");
+  assert.deepEqual(orchModelSelection("opus", "high", acct), { ...main, instanceId: "mei_orch" });
+  assert.equal(orchModelSelection("opus", "high", { t3Instance: "mei" }).instanceId, "mei", "no orch instance: the plain one");
+  const on = (instanceId) => ({ instanceId, model: "claude-opus-5-5" });
+  assert.deepEqual(asOrchSelection(on("mei"), "orchestrator", acct), on("mei_orch"));
+  assert.deepEqual(asOrchSelection(on("ultra"), "triage", acct), on("ultra_orch"), "the second account maps to its own orch");
+  assert.deepEqual(asOrchSelection(on("mei"), "own", acct), on("mei"), "Russell's own thread never moves to _orch");
+  for (const i of ["mei_orch", "mei_workers", "codex"]) assert.deepEqual(asOrchSelection(on(i), "orchestrator", acct), on(i));
+  assert.equal(asOrchSelection(undefined, "orchestrator", acct), undefined);
+  assert.deepEqual(asOrchSelection(on("mei"), "orchestrator", { t3Instance: "mei" }), on("mei"), "no orch configured: unchanged");
 });
