@@ -269,7 +269,7 @@ function budgetGate() {
   if (!capped) return;
   const round = nextRound() + otherFinalRounds();
   if (round <= maxRounds) return;
-  const line = finalKey ? `final review budget: round ${round} > ${maxRounds} for ${finalKey} (its -final JOBs share one count); nothing sent. Fix what you agree with and file should and nit findings as follow-up items; a blocker past the gate goes to the user: stop and ask the user, never file it away. REVIEW_ROUNDS=5 only for an evidenced security, data-loss or concurrency blocker.`
+  const line = finalKey ? `final review budget: round ${round} > ${maxRounds} for ${finalKey} (its -final JOBs share one count); nothing sent. In this order: a blocker past the gate goes to the user: stop and ask the user, never file it away. Then fix accepted small findings in files the plan touches; park the remaining optional findings and nits; file the remaining defects as follow-up items. REVIEW_ROUNDS=5 only for an evidenced security, data-loss or concurrency blocker.`
     : `review budget: round ${round} > ${maxRounds} for ${path.basename(job)}; nothing sent. Fix what you agree with, then commit with every open id disputed (with evidence), stop and ask the user, or write closed.md (orchestrate §9). REVIEW_ROUNDS=5 only for an evidenced security, data-loss or concurrency blocker.`;
   log(line);
   console.error(line);

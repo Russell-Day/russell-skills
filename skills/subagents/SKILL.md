@@ -292,8 +292,10 @@ JOB=<lead>-inventory    $S/run.sh gemini-flash /tmp/<lead>-inventory.md
 - **Finals count per plan:** every `<plan>-final*` JOB shares one count, so a
   new JOB name doesn't reset it. A final run that ends with no verdict and no
   findings (content flag, crash) isn't counted; one with findings and no
-  verdict is. Past the gate, fix what you agree with and file should/nit
-  findings as follow-up items; a blocker goes to the user, never filed away.
+  verdict is. Past the gate, in this order: a blocker goes to the user,
+  never filed away; fix accepted small findings in files the plan touches;
+  park the remaining optional findings and nits so they start nothing; file
+  the remaining defects as follow-up items.
 
 Reviews run on `t3-thread.mjs`, so rechecks can continue the reviewer's own
 thread:
