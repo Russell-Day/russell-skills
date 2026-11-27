@@ -66,16 +66,25 @@ bigger one before dispatch: a 25-file stage's worker ran out of context and
 handed off with no tests written; write the count in the plan's Files owned
 cell), keeps UI and
 backend apart when the reviewer differs, and comes after any stage whose
-output it needs. Models per stage come from the subagents routing table.
+output it needs. Models per stage come from the subagents routing table;
+each stage's Model cell also gives its effort and, for a risky stage, the risk
+word from the fixed list (subagents "Effort"): `opus medium`, `opus high ·
+risky: deletes`. No effort written means high.
 Quick wins first so the user sees movement; risky stages when quota is fresh.
+An L plan (6+ stages) follows subagents "L plans": a stage that passes the
+five split tests against the rest is carved out as its own S plan or fast
+lane, a true split is rare, and a **Seams** section (ids, data shapes and APIs
+that cross stages) goes into the plan before S1.
 
 ## 3. Plan file
 
 Write `planning/<plan>/plan.md` (fallback `docs/plans/<plan>.md`) from
-[templates/plan.md](templates/plan.md): stage table (items, model, status),
+[templates/plan.md](templates/plan.md): stage table (items, model + effort +
+risk, status),
 the user's decisions, open questions, the commit rule, the **Review
 lessons** (§9), and a **Resume**
-section (stage status, decisions, next step, open risks). Keep the status
+section (stage status, decisions, next step, open risks; short: state and
+the next step, history goes to the Log). Keep the status
 column and Resume current: the lead, the user and a woken thread read them.
 
 A stage ends in one of two ways, and its Status cell says which:
@@ -129,11 +138,14 @@ decisions, owned files and the other stages' WIP, the plan's Review lessons
 so far, input → expected output,
 foreground tests, no stash or commit, no helpers, the packet and `VERDICT:`;
 add the project's hard rules), and launch it: T3's `delegate_task` by default
-(subagents "Dispatch": clientRequestId `<prefix><stage>-impl-r1`, fix rounds
-by `t3_thread_send`). When the goal is a measured number (a score, a latency,
+(subagents "Dispatch": clientRequestId `<prefix><stage>-impl-r1`, target
+effort = the stage's effort from the table, fix rounds by `t3_thread_send`).
+A next in-order stage may continue on the same worker thread only under
+subagents "L plans" (same effort, prior stage committed, 0 compactions), its
+message opening with `JOB: <prefix><stage>-impl`. When the goal is a measured number (a score, a latency,
 a cost), the prompt opens with its line from the source, quoted, and the
 number to beat: a paraphrase drifts with each hand-off. The `t3-thread.mjs`
-fallback, also the JOB naming reference:
+fallback, also the JOB naming reference (`EFFORT` = the stage's effort):
 
 ```bash
 # one Bash call each, run_in_background: true (no trailing &), so its exit wakes you;

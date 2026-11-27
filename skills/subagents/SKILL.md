@@ -28,7 +28,64 @@ tokens and several minutes getting up to speed, so hand-offs cost real quota.
   each. Stages in disjoint files: parallel Opus workers. Mixed: write the
   in-order part yourself, hand the disjoint part to workers.
 - **`l` (6+ stages): orchestrator.** The lead plans, dispatches a worker per
-  stage and reviews; it writes no stages itself.
+  stage and reviews; it writes no stages itself. L rules: "L plans" below.
+
+**Effort.** The plan's stage table gives each stage a model, an effort and a
+risk word ("opus medium", "opus high · risky: deletes"); every launch and
+dispatch copies that effort. High is the default and medium is always
+explicit, so a forgotten label fails safe. Medium fits a one-thread S plan, an
+M plan the lead runs alone, and a worker stage that isn't risky; risky stages
+(concurrency, schema/migration, auth, mail/messages, deletes, GPU, secrets),
+leads that dispatch workers, orchestrators and reviewers stay high. A fix turn
+keeps the worker's effort (no switch on a warm thread). A medium thread whose
+work grows past that (a lone M lead that starts dispatching included) moves
+to a fresh high thread instead of carrying on at medium.
+
+### L plans
+
+**Carve out the stray stage first.** At planning (and when grouping items),
+test every stage against the rest of the plan with the five tests below; one
+that passes all five was grouped in by mistake: give it its own S plan or a
+fast lane, never build it inside the L.
+
+**A true split of an L into two M plans is rare:** only at planning time,
+before any stage starts, and only when both groups pass all five tests:
+1. **Files:** owned lists disjoint, counting fixtures, shared styles,
+   schema/migrations, config keys and generated files.
+2. **Nothing new shared:** neither half reads or writes a data shape,
+   endpoint, event, store key, setting, tool name or id that the plan adds or
+   changes (stable interfaces at HEAD are fine).
+3. **Acceptance:** each half has its own input -> expected output; no case
+   spans both.
+4. **Order-free:** either can commit first, and either can be reverted while
+   the other's tests and behaviour stay the same.
+5. **Decisions:** no answer from the user governs both halves.
+
+When test 2 fails on exactly one small contract that can be frozen, split
+owner first: one plan owns the contract file(s) and their exported names,
+writes the contract in its own plan and commits first; the other waits on it,
+treats those files as read-only, keeps the owner's tests green, and its final
+review names the contract files in scope (the seam belongs to the later
+plan). No shared prose contract, no joint final. More than one contract, or
+one still being shaped: **keep the L.**
+
+**Cheaper L cuts (no split):**
+- **One worker thread per in-order chain:** S3 -> S4 continue on the S3
+  worker's thread instead of a fresh worker (saves the ~50k start-up), only
+  when both stages have the same effort (a medium worker never carries into a
+  high or risky stage), the prior stage is committed (APPROVE or close note;
+  never two stages' work open on one thread) and the thread has 0
+  compactions; otherwise a fresh worker. Disjoint stages still get their own
+  workers. Each chained stage gets its own job name, sent as the first line of
+  its message (`JOB: plan<N>-<stage>-impl`), so stats and hand-offs see the
+  stage.
+- **Seams section first:** before S1 the orchestrator writes into the plan
+  the ids, data shapes and APIs that cross stages; each stage review is told
+  to check its side, and a seam review runs once both sides of a seam have
+  landed (not at the final).
+- **The final's round gate holds per plan** ("Review cadence", budget).
+- **Short Resume:** state + next step; history goes to the Log.
+- The L orchestrator still writes no stages.
 
 Parallel workers buy speed, not savings: four Opus workers empty a Claude
 5-hour session in about three hours. Before each Claude Opus worker, check
@@ -113,8 +170,8 @@ Scores are 0–10, higher is better, except **Cost**, where higher means scarcer
 |---|---|---|---:|---:|---:|---:|---:|---:|
 | `terra61` | `gpt-6.1-terra` (Codex) | **high**, every review and recheck | – | – | – | 9 | – | 5 |
 | `sol62` | `gpt-6.2-sol` (Codex) | **high, final reviews only** (alone) | 5 | 5 | 7 | 9 | 8 | 5 |
-| `fable` | `claude-fable-5-2` (Claude) | med | 10 | 8 | 8 | 8 | – | 5 |
-| `opus` | `claude-opus-5-5` (Claude) | high (workers and leads) | 7 | 9 | 9 | 8 | – | 3 |
+| `fable` | `claude-fable-5-2` (Claude) | med (both launchers) | 10 | 8 | 8 | 8 | – | 5 |
+| `opus` | `claude-opus-5-5` (Claude) | high (workers and leads); medium only where the stage table says so | 7 | 9 | 9 | 8 | – | 3 |
 | `haiku` | `claude-haiku-5-5` (Claude) | high | 2 | – | 4 | – | 7 | 1 |
 | `sonnet` | `claude-sonnet-5-5` (Claude) | not routed (Haiku does its helper and explorer work) | 3 | 6 | 6 | 3 | 8 | 2 |
 | `gemini-flash` | `gemini-3.8-flash-{low,medium,high}` (AGY) | high | 0 | 3 | 3 | 2 | 4 | 1 |
@@ -232,6 +289,11 @@ JOB=<lead>-inventory    $S/run.sh gemini-flash /tmp/<lead>-inventory.md
   job dir that already counts rounds) and refuses the 4th unless
   `REVIEW_ROUNDS=5`. Reviews sent through `delegate_task` have no gate: run
   them on `t3-thread.mjs`.
+- **Finals count per plan:** every `<plan>-final*` JOB shares one count, so a
+  new JOB name doesn't reset it. A final run that ends with no verdict and no
+  findings (content flag, crash) isn't counted; one with findings and no
+  verdict is. Past the gate, fix what you agree with and file should/nit
+  findings as follow-up items; a blocker goes to the user, never filed away.
 
 Reviews run on `t3-thread.mjs`, so rechecks can continue the reviewer's own
 thread:
@@ -337,7 +399,8 @@ The child shows under the lead in the user's sidebar and its completion wakes
 the lead, so end the turn instead of polling. Per job:
 - `target`: `{providerInstanceId, model, options}` from
   `orchestrator_capabilities`. Workers: `claude.t3WorkerInstance` /
-  `claude-opus-5-5` / `{effort: "high"}`; terra61 (review fallback): `codex` /
+  `claude-opus-5-5` / `{effort: "<the stage table's effort>"}` (`"high"`
+  unless the stage says medium); terra61 (review fallback): `codex` /
   `gpt-6.1-terra` / `{reasoningEffort: "high"}`; Haiku: the Haiku profile in
   `accounts.local.md`.
   Instance ids are this machine's: `claude.*` and `codex.accounts[].t3Instance`
@@ -372,7 +435,8 @@ the lead, so end the turn instead of polling. Per job:
 `delegate_task` is unavailable (no T3 MCP in the session, a headless lead) or
 for features it lacks (ACCOUNT pools and auto fallback across accounts,
 `--orchestrator`, compaction hand-off). The user can watch and steer it from the sidebar too. It takes the same labels and env
-as `run.sh`: `EFFORT`, `ACCOUNT`, `JOB`, `TIMEOUT`, `NO_SETTLE`. It opens a
+as `run.sh`: `EFFORT` (the stage's effort; unset = the label's default),
+`ACCOUNT`, `JOB`, `TIMEOUT`, `NO_SETTLE`. It opens a
 `[<model>] <job>` thread, waits for the turn to finish, and writes
 `~/.local/state/agent-jobs/<job>/{report.md,transcript.md,thread_id,exit_code}`.
 A worker that writes its packet into `report.md` itself keeps it (its final

@@ -183,7 +183,7 @@ function selection(label) {
     case "terra61": return codex("gpt-6.1-terra", "high"); // every stage review; finals are sol62 alone
     case "luna": return codex("gpt-6-luna", "xhigh");
     case "astra": return codex("gpt-6-astra", "low"); // EFFORT=medium for final checks
-    case "fable": return claude("claude-fable-5-2", []);
+    case "fable": return claude("claude-fable-5-2", [], "medium"); // medium by default; EFFORT= overrides
     case "opus": return claude("claude-opus-5-5", [{ id: "fastMode", value: false }]);
     case "sonnet": return claude("claude-sonnet-5-5", [], "high");
     case "haiku": return claude("claude-haiku-5-5", [], "high");
@@ -241,21 +241,36 @@ let countedRound = 0, roundsBefore = null;
 const nextRound = () => { try { return (Number.parseInt(fs.readFileSync(path.join(job, "rounds"), "utf8"), 10) || 0) + 1; } catch { return 1; } };
 const failedTurns = () => { try { return fs.readFileSync(path.join(job, "rounds_failed"), "utf8").split("\n").filter((l) => l.trim()).length; } catch { return 0; } };
 const PROVIDER_FAILS_MAX = 3;
+// A plan's final review rounds share one count: every `<key>-final…` JOB in the
+// jobs dir (`<key>-final-sol`, `<key>-final2`, …) adds its `rounds`, so a fresh final JOB doesn't
+// restart the budget. A final run that ends with no verdict and no findings isn't a round (its
+// round goes back, a `rounds_empty` line instead; these and provider errors stop at PROVIDER_FAILS_MAX).
+const FINAL_JOB_RE = /^(.+?)-final(?=-|\d|$)/i;
+const finalKey = FINAL_JOB_RE.exec(path.basename(job))?.[1]?.toLowerCase() ?? null;
+function otherFinalRounds() {
+  if (!finalKey) return 0;
+  let names = [];
+  try { names = fs.readdirSync(path.dirname(job)); } catch { return 0; }
+  return names.filter((n) => n !== path.basename(job) && FINAL_JOB_RE.exec(n)?.[1]?.toLowerCase() === finalKey)
+    .reduce((sum, n) => { try { return sum + (Number.parseInt(fs.readFileSync(path.join(path.dirname(job), n, "rounds"), "utf8"), 10) || 0); } catch { return sum; } }, 0);
+}
+const emptyTurns = () => { try { return fs.readFileSync(path.join(job, "rounds_empty"), "utf8").split("\n").filter((l) => l.trim()).length; } catch { return 0; } };
 function budgetGate() {
   if (!isReview || roundCounted) return;
   // Provider-error turns aren't rounds (plan 1120 S3b), so a refusal loop could send forever: 3 stop it, on any model.
-  const failed = failedTurns();
+  const empty = emptyTurns(), failed = failedTurns() + empty;
   if (failed >= PROVIDER_FAILS_MAX) {
-    const line = `${failed} provider-error turns on ${path.basename(job)}: start a fresh review (new JOB) or another model, or write closed.md`;
+    const line = `${failed} provider-error${empty ? " or empty final" : ""} turns on ${path.basename(job)}: start a fresh review (new JOB) or another model, or write closed.md`;
     log(line);
     console.error(line);
     fs.writeFileSync(path.join(job, "exit_code"), "3\n");
     process.exit(3);
   }
   if (!capped) return;
-  const round = nextRound();
+  const round = nextRound() + otherFinalRounds();
   if (round <= maxRounds) return;
-  const line = `review budget: round ${round} > ${maxRounds} for ${path.basename(job)}; nothing sent. Fix what you agree with, then commit with every open id disputed (with evidence), stop and ask the user, or write closed.md (orchestrate §9). REVIEW_ROUNDS=5 only for an evidenced security, data-loss or concurrency blocker.`;
+  const line = finalKey ? `final review budget: round ${round} > ${maxRounds} for ${finalKey} (its -final JOBs share one count); nothing sent. Fix what you agree with and file should and nit findings as follow-up items; a blocker past the gate goes to the user: stop and ask the user, never file it away. REVIEW_ROUNDS=5 only for an evidenced security, data-loss or concurrency blocker.`
+    : `review budget: round ${round} > ${maxRounds} for ${path.basename(job)}; nothing sent. Fix what you agree with, then commit with every open id disputed (with evidence), stop and ask the user, or write closed.md (orchestrate §9). REVIEW_ROUNDS=5 only for an evidenced security, data-loss or concurrency blocker.`;
   log(line);
   console.error(line);
   fs.writeFileSync(path.join(job, "exit_code"), "3\n");
@@ -269,7 +284,7 @@ function budgetCount() {
   fs.writeFileSync(file, `${round}\n`);
   roundCounted = true;
   countedRound = round;
-  log(`review round ${round}/${capped ? maxRounds : "uncapped"}`);
+  log(`review round ${round}/${capped ? maxRounds : "uncapped"}${finalKey ? ` (${finalKey} finals: ${round + otherFinalRounds()})` : ""}`);
 }
 if (!(process.env.ATTACH && !process.env.CONTINUE)) budgetGate();
 // The thread that started this job, so a tool counting working threads counts a
@@ -1060,6 +1075,23 @@ function uncountProviderError({ thread, rc, threadId, priorRunId }) {
   console.error(line);
 }
 uncountProviderError(result);
+// A final run that ends with no verdict and no findings (`F1 [blocker|should|nit]`) reviewed
+// nothing: its round goes back (see FINAL_JOB_RE). One with findings and no verdict counts.
+const FINDING_RE = /\bF\d+\s*\[?(blocker|should|nit)\b/i;
+function uncountEmptyFinal({ thread, threadId }) {
+  if (!roundCounted || !finalKey) return;
+  let text = "";
+  try { text = lastReplyOf(threadId, thread); } catch (e) { log("rounds: reading the final reply", e.message); return; }
+  if (VERDICT_RE.test(text) || FINDING_RE.test(text)) return;
+  const line = `round ${countedRound} not counted: the final run ended with no verdict and no findings`;
+  fs.appendFileSync(path.join(job, "rounds_empty"), `${new Date().toISOString()} ${threadId} ${line}\n`);
+  const file = path.join(job, "rounds");
+  if (roundsBefore === null) fs.rmSync(file, { force: true }); else fs.writeFileSync(file, roundsBefore);
+  roundCounted = false;
+  log(line);
+  console.error(line);
+}
+uncountEmptyFinal(result);
 
 const { thread, rc, threadId } = result;
 saveReport(thread);

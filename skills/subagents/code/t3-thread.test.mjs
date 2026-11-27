@@ -1628,8 +1628,14 @@ test("timeout: the running run is interrupted with run.interrupt; exit 124", () 
 // New stage, fresh reviewer: a sol62/astra thread ATTACHed with CONTINUE under a
 // JOB other than the one whose job dir records it starts a fresh thread; the same JOB continues.
 const sol62Sel = JSON.stringify({ instanceId: "codex", model: "gpt-6.2-sol", options: [{ id: "reasoningEffort", value: "medium" }, { id: "serviceTier", value: "default" }] });
+// FAKE_REPLY: every new turn (not /compact) that doesn't fail replies with this text.
+const replyPreload = `
+const replyBase = globalThis.fakeT3Outcome;
+globalThis.fakeT3Outcome = (thread, command, db) => { const o = replyBase(thread, command, db); return process.env.FAKE_REPLY && command.text !== "/compact" && !o?.error ? { ...o, reply: process.env.FAKE_REPLY } : o; };
+`;
 function reviewerHome(rows = []) {
   const f = handoffHome(rows);
+  fs.appendFileSync(f.preload, replyPreload);
   f.oldThread({ title: "[sol62] Review S1", model_selection_json: sol62Sel });
   const readJob = (job, file) => { try { return fs.readFileSync(path.join(f.jobs, job, file), "utf8"); } catch { return ""; } };
   const review = (job, extra = {}) => f.run({ JOB: job, TITLE: "Review S2", REPORT_FILE: path.join(f.jobs, job, "report.md"), ...extra }, ["sol62", f.prompt]);
@@ -1805,9 +1811,56 @@ test("review budget: rounds 1-3 go (a free-form recheck counts), the 4th sends n
 test("review budget: a -review/-final JOB counts with any brief; a worker job doesn't", () => {
   const f = reviewerHome();
   fs.writeFileSync(f.prompt, "FINAL REVIEW ONLY (all stages).");
-  for (const job of ["x-final-sol", "x-s1-review", "x-s2-recheck1"]) { ok(f.review(job)); assert.equal(f.readJob(job, "rounds"), "1\n", job); }
+  for (const job of ["x-final-sol", "x-s1-review", "x-s2-recheck1"]) { ok(f.review(job, { FAKE_REPLY: "F1 [should] a.py / x / y\n\nVERDICT: REVISE" })); assert.equal(f.readJob(job, "rounds"), "1\n", job); }
   fs.writeFileSync(f.prompt, "fix finding 2");
   for (const job of ["x-s1-impl", "x-finalize"]) { ok(f.review(job)); assert.equal(f.readJob(job, "rounds"), "", job); }
+});
+
+// Final reviews share one count per plan key: `<key>-final…` JOBs add their rounds, so a fresh
+// final JOB doesn't restart the budget; a final run with no verdict and no findings isn't a round.
+const REVISE = { FAKE_REPLY: "F1 [blocker] a.py / x / y\n\nVERDICT: REVISE" };
+test("final review budget: a plan's -final JOBs share one count; the 4th sends nothing and sends a blocker to the user", () => {
+  const f = reviewerHome();
+  fs.writeFileSync(f.prompt, "FINAL REVIEW ONLY (all stages).");
+  for (const job of ["plan9-final-sol", "plan9-final2", "plan9-final-sol-r3"]) ok(f.review(job, REVISE));
+  const before = f.sent("message.dispatch").length;
+  const r = f.review("plan9-final-sol-r4", REVISE);
+  assert.equal(r.status, 3, r.stderr);
+  assert.match(r.stderr, /final review budget: round 4 > 3 for plan9 \(its -final JOBs share one count\); nothing sent\..*a blocker past the gate goes to the user: stop and ask the user, never file it away\./);
+  assert.equal(f.sent("message.dispatch").length, before, "no turn");
+  assert.equal(f.readJob("plan9-final-sol-r4", "exit_code"), "3\n");
+  // Another plan's finals and this plan's stage reviews keep their own counts.
+  ok(f.review("plan10-final-sol", REVISE));
+  assert.equal(f.readJob("plan10-final-sol", "rounds"), "1\n");
+  ok(f.review("plan9-S1-review", REVISE));
+  assert.equal(f.readJob("plan9-S1-review", "rounds"), "1\n");
+  // REVIEW_ROUNDS=5 (an evidenced blocker) lifts the plan's gate to 5.
+  ok(f.review("plan9-final-sol-r4", { ...REVISE, REVIEW_ROUNDS: "5" }));
+  assert.equal(f.readJob("plan9-final-sol-r4", "rounds"), "1\n");
+  ok(f.review("plan9-final-sol-r5", { ...REVISE, REVIEW_ROUNDS: "5" }));
+  assert.equal(f.review("plan9-final-sol-r6", { ...REVISE, REVIEW_ROUNDS: "5" }).status, 3);
+});
+
+test("final review budget: a final run with no verdict and no findings isn't a round; one with findings is", () => {
+  const f = reviewerHome();
+  fs.writeFileSync(f.prompt, "FINAL REVIEW ONLY (all stages).");
+  const r = ok(f.review("plan9-final-sol", { FAKE_REPLY: "Still reading the diff." }));
+  assert.equal(f.readJob("plan9-final-sol", "rounds"), "", "its round went back");
+  const empty = f.readJob("plan9-final-sol", "rounds_empty").split("\n").filter(Boolean);
+  assert.equal(empty.length, 1, empty.join("\n"));
+  assert.ok(empty[0].endsWith("round 1 not counted: the final run ended with no verdict and no findings"), empty[0]);
+  assert.ok(r.stderr.includes("round 1 not counted: the final run ended with no verdict and no findings"), r.stderr);
+  ok(f.review("plan9-final-sol", { FAKE_REPLY: "F1 [should] a.py / x / y (out of time before the verdict)" }));
+  assert.equal(f.readJob("plan9-final-sol", "rounds"), "1\n", "findings without a verdict count");
+  // A stage review's empty reply still counts (only finals give it back).
+  ok(f.review("plan9-S1-review", { FAKE_REPLY: "Still reading the diff." }));
+  assert.equal(f.readJob("plan9-S1-review", "rounds"), "1\n");
+  // Empty finals stop at 3 like provider errors.
+  ok(f.review("plan9-final-sol", { FAKE_REPLY: "Still reading." }));
+  ok(f.review("plan9-final-sol", { FAKE_REPLY: "Still reading." }));
+  const stop = f.review("plan9-final-sol", { FAKE_REPLY: "Still reading." });
+  assert.equal(stop.status, 3, stop.stderr);
+  assert.match(stop.stderr, /3 provider-error or empty final turns on plan9-final-sol/);
 });
 
 // Provider-error turns (plan 1120 S3b, chk_335c542350db4fa8): a launch that ends failed with a
