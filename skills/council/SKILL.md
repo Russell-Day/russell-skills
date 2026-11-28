@@ -1,6 +1,6 @@
 ---
 name: council
-description: Run a council, a scored multi-model review by Opus and Sol 6.2 at high effort (Fable joins round 1 and the final check on plans, design docs and writing), looping until every member scores at least 9/10, then record the rounds and scores in the commit or PR. For UI and design ("UI council", "council the design") members score fresh screenshots against reference apps per category, and the work ends with an annotated before/after image of what changed (ui.md). Use only when the user asks for a council (e.g. "council", "council this", "run the council on the plan"); it never replaces the normal review cadence.
+description: Run a council, a scored multi-model review by Opus and Sol 6.2 at high effort (Fable joins round 1 and the final check on plans, design docs and writing), looping until every member scores at least 9/10, then record the rounds and scores in the commit or PR. For UI and design ("UI council", "council the design") members score fresh screenshots against reference apps per category, and the work ends with an annotated before/after image of what changed (ui.md). A "weak council" ("weak council this", "run a weak council on the plan") seats Opus and Sol 6.2 only, no Fable, on any work. Use only when the user asks for a council or a weak council (e.g. "council", "council this", "run the council on the plan"); it never replaces the normal review cadence.
 ---
 
 # Council
@@ -32,6 +32,18 @@ round 1 (blind) and the final check there, and Opus does the rechecks between.
 If the user names other members (including "with Fable" on code or UI), use
 those instead and keep the same loop, cheapest first. Effort is high for every
 member.
+
+## Weak council
+
+When the user asks for a **weak council** ("weak council this", "run a weak
+council on the plan"), seat only Opus and Sol 6.2, on every kind of work.
+Fable doesn't sit, not in round 1 and not as the final check, even on plans,
+design docs and writing. (A request that names Fable too is a council with
+named members, above, not a weak council.) Everything else is the
+same: high effort, the 9/10 bar, a blind round 1, the loop below without
+step 4, and ui.md for UI work. On code and UI a weak council is the same as a
+council. Record it as a weak council (see "Recording the rounds") so its 9/10
+isn't read as a full council's.
 
 ## Before round 1
 
@@ -78,7 +90,7 @@ background task and wait for all of them:
 S=~/.agents/skills/subagents/code   # or the repo's own subagents copy
 EFFORT=high JOB=<topic>-council-opus  node $S/t3-thread.mjs opus  /tmp/<topic>-council.md
 EFFORT=high JOB=<topic>-council-sol62 node $S/t3-thread.mjs sol62 /tmp/<topic>-council.md
-# plans, design docs, writing only:
+# plans, design docs, writing only (never in a weak council):
 EFFORT=high JOB=<topic>-council-fable node $S/t3-thread.mjs fable /tmp/<topic>-council.md
 ```
 
@@ -99,7 +111,8 @@ so its brief carries the earlier findings and what changed.
 3. **Sol 6.2.** Recheck Sol, fix, and repeat until it scores 9 or higher. If a
    fix is big (a new design, not a patch), send it past Opus once more before
    Sol sees it.
-4. **Fable final check** (plans, design docs, writing only). Recheck Fable
+4. **Fable final check** (plans, design docs, writing only; never in a weak
+   council). Recheck Fable
    once Opus and Sol are both at 9 or higher. If it scores under 9, fix and
    recheck Fable until it reaches 9; a big fix goes past Opus first.
 5. **Done** when every available member's latest score is 9 or higher. There
@@ -154,6 +167,8 @@ Rounds: 4 · passed at 9/10 each
 - An `unavailable` member is left out of the averages, and the header says so:
   `Rounds: 3 · passed at 9/10 (Fable unavailable: weekly limit)`.
 - Add a trailer line to the commit: `Council: 4 rounds, 6.7 → 9.0`.
+- A weak council has no Fable row; its header is `## Weak council` and its
+  trailer `Weak council: 3 rounds, 7.0 → 9.0`.
 
 Then give the user a short summary: the score path, the findings you took, the
 ones you turned down and why, and anything still open. A UI council also
