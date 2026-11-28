@@ -212,6 +212,28 @@ test("AGY out: EFFORT override is kept on Haiku", () => {
   assert.equal(created.modelSelection.options.find((o) => o.id === "effort").value, "medium");
 });
 
+// A review runs at least high on every model unless EFFORT says otherwise; a review is a
+// REVIEW ONLY. / RECHECK ONLY. brief or a review JOB name (the round gate's naming).
+test("Fable runs a review at high (brief or JOB name), ordinary Fable work at medium, EFFORT wins", () => {
+  const f = agyHome();
+  const prompt = path.join(f.home, "prompt.md");
+  const effortOf = (job) => [f.attempts(job).map((a) => a.effort), f.sent("thread.create").at(-1).modelSelection.options.find((o) => o.id === "effort").value];
+  f.run("plan9-S1-impl", {}, "fable");
+  assert.deepEqual(effortOf("plan9-S1-impl"), [["medium"], "medium"], "ordinary Fable work");
+  for (const job of ["plan9-S1-review", "plan9-s2-recheck1", "plan9-final-sol", "plan9-final2"]) {
+    f.run(job, {}, "fable");
+    assert.deepEqual(effortOf(job), [["high"], "high"], job);
+  }
+  fs.writeFileSync(prompt, "REVIEW ONLY. Read the diff.");
+  f.run("by-brief", {}, "fable");
+  assert.deepEqual(effortOf("by-brief"), [["high"], "high"], "a REVIEW ONLY. brief");
+  fs.writeFileSync(prompt, "\n  RECHECK ONLY. F1 again.");
+  f.run("by-recheck-brief", {}, "fable");
+  assert.deepEqual(effortOf("by-recheck-brief"), [["high"], "high"], "a RECHECK ONLY. brief");
+  f.run("by-brief-medium", { EFFORT: "medium" }, "fable");
+  assert.deepEqual(effortOf("by-brief-medium"), [["medium"], "medium"], "EFFORT wins over the review default");
+});
+
 test("AGY recovered (reset passed) or stale state: Gemini runs", () => {
   for (const state of [outState(10, -5), outState(180, 300)]) {
     const f = agyHome({ state });
@@ -1826,7 +1848,7 @@ test("final review budget: a plan's -final JOBs share one count; the 4th sends n
   const before = f.sent("message.dispatch").length;
   const r = f.review("plan9-final-sol-r4", REVISE);
   assert.equal(r.status, 3, r.stderr);
-  assert.match(r.stderr, /final review budget: round 4 > 3 for plan9 \(its -final JOBs share one count\); nothing sent\..*a blocker past the gate goes to the user: stop and ask the user, never file it away\./);
+  assert.match(r.stderr, /final review budget: round 4 > 3 for plan9 \(its -final JOBs share one count\); nothing sent\..*Stop and ask the user about blockers\./);
   assert.equal(f.sent("message.dispatch").length, before, "no turn");
   assert.equal(f.readJob("plan9-final-sol-r4", "exit_code"), "3\n");
   // Another plan's finals and this plan's stage reviews keep their own counts.
@@ -1855,12 +1877,18 @@ test("final review budget: a final run with no verdict and no findings isn't a r
   // A stage review's empty reply still counts (only finals give it back).
   ok(f.review("plan9-S1-review", { FAKE_REPLY: "Still reading the diff." }));
   assert.equal(f.readJob("plan9-S1-review", "rounds"), "1\n");
-  // Empty finals stop at 3 like provider errors.
-  ok(f.review("plan9-final-sol", { FAKE_REPLY: "Still reading." }));
-  ok(f.review("plan9-final-sol", { FAKE_REPLY: "Still reading." }));
-  const stop = f.review("plan9-final-sol", { FAKE_REPLY: "Still reading." });
-  assert.equal(stop.status, 3, stop.stderr);
-  assert.match(stop.stderr, /3 provider-error or empty final turns on plan9-final-sol/);
+  // Empty finals aren't provider errors either, so three of them don't force a fresh job while
+  // review rounds are left; each one still sends and gives its round back.
+  for (let i = 0; i < 3; i++) {
+    const before = f.sent("message.dispatch").length;
+    const r2 = ok(f.review("plan9-final-sol", { FAKE_REPLY: "Still reading." }));
+    assert.ok(f.sent("message.dispatch").length > before, `empty final ${i + 2} sent its turn`);
+    assert.doesNotMatch(r2.stderr, /provider-error/);
+  }
+  assert.equal(f.readJob("plan9-final-sol", "rounds_empty").split("\n").filter(Boolean).length, 4);
+  assert.equal(f.readJob("plan9-final-sol", "rounds"), "1\n", "the one round with findings is all that counted");
+  ok(f.review("plan9-final-sol", REVISE));
+  assert.equal(f.readJob("plan9-final-sol", "rounds"), "2\n");
 });
 
 // Provider-error turns (plan 1120 S3b, chk_335c542350db4fa8): a launch that ends failed with a
@@ -1931,4 +1959,51 @@ test("review budget: 3 provider-error turns refuse the 4th send with exit 3", ()
   // An uncapped Opus review stops the same way.
   assert.equal(f.run({ JOB: "p1", REPORT_FILE: path.join(f.jobs, "p1", "report.md") }, ["opus", f.prompt]).status, 3);
   assert.equal(f.sent("message.dispatch").length, before);
+});
+
+// One role rule for effort and the final budget; a resumed review's saved medium rises to high
+// unless EFFORT is set.
+test("a resumed Fable review lifts its saved medium without EFFORT; EFFORT and ordinary work keep theirs", () => {
+  const old = "22222222-2222-4222-8222-222222222222";
+  const selection = JSON.stringify({ instanceId: claude.t3WorkerInstance, model: "claude-fable-5-2", options: [{ id: "effort", value: "medium" }] });
+  for (const [job, brief, env, want] of [
+    ["plan8-s1-recheck", "RECHECK ONLY. Verify the diff.", {}, "high"],
+    ["plan8-s1-recheck", "RECHECK ONLY. Verify the diff.", { EFFORT: "medium" }, "medium"],
+    ["plan8-s1-impl-r2", "Fix F1 and test.", {}, "medium"],
+  ]) {
+    const f = agyHome({ threads: [{ thread_id: old, project_id: "proj-1", model_selection_json: selection }] });
+    fs.writeFileSync(path.join(f.home, "prompt.md"), brief);
+    ok(f.run(job, { ATTACH: old, CONTINUE: "1", ...env }, "fable"));
+    const sent = f.sent("message.dispatch").at(-1);
+    assert.equal(sent.threadId, old);
+    assert.equal(sent.modelSelection.options.find((o) => o.id === "effort").value, want, `${job} ${JSON.stringify(env)}`);
+  }
+});
+
+test("a direct Fable final review defaults to high", () => {
+  const f = reviewerHome();
+  fs.writeFileSync(f.prompt, "FINAL REVIEW ONLY. Review the changes.");
+  ok(f.run({ JOB: "sample-final-fable", ATTACH: "", CONTINUE: "", EFFORT: undefined, FAKE_REPLY: "VERDICT: REVISE" }, ["fable", f.prompt]));
+  assert.equal(f.sent("thread.create").at(-1).modelSelection.options.find((o) => o.id === "effort").value, "high");
+});
+
+test("a -final-fix worker is ordinary work: medium, no final round, not gated by spent finals", () => {
+  const f = agyHome();
+  fs.writeFileSync(path.join(f.home, "prompt.md"), "Fix the findings and test.");
+  ok(f.run("plan8-final-fix-r1", {}, "fable"));
+  const sel = f.sent("message.dispatch").at(-1).modelSelection;
+  assert.deepEqual([sel.options.find((o) => o.id === "effort").value, f.read("plan8-final-fix-r1", "rounds")], ["medium", ""]);
+  const final = path.join(f.home, JOBS, "plan8-final-sol");
+  fs.mkdirSync(final, { recursive: true });
+  fs.writeFileSync(path.join(final, "rounds"), "3\n");
+  const before = f.sent("message.dispatch").length;
+  const r = f.run("plan8-final-fix-r2", {}, "fable");
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(f.sent("message.dispatch").length, before + 1);
+  const effortOf = () => f.sent("thread.create").at(-1).modelSelection.options.find((o) => o.id === "effort").value;
+  for (const [job, want] of [["plan8-s2-fix-review", "high"], ["plan8-s1-terra-r2", "high"], ["plan8-final-sol-r2", "high"],
+    ["plan8-s1-impl-r2", "medium"], ["plan8-finalize-impl", "medium"], ["plan8-s1-opus-r2", "medium"]]) {
+    f.run(job, {}, "fable");
+    assert.equal(effortOf(), want, job);
+  }
 });

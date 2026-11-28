@@ -51,6 +51,43 @@ case $model in
                 id=gemini-3.8-flash-$effort ;;   # AGY encodes the level in the slug
   *) echo "unknown model: $model" >&2; usage ;;
 esac
+# A review runs at least high on every model unless EFFORT says otherwise, with
+# t3-thread.mjs's one role rule (nameRole): a JOB name with a review/recheck token is a review's
+# (-review, -recheck1, -fix-review); with no fix/impl/work/build token, so is a final (-final,
+# -final2, -final-sol-r2) or a name ending in a reviewer (-terra, -sol, -codex, an -rN after). A fix
+# or impl name (-final-fix-r2, -impl-r1) never is; a council name says neither, and then the brief
+# decides (REVIEW ONLY. / RECHECK ONLY.). Fable's own medium (any default below high) is ordinary work.
+name_role() {  # prints review, work or nothing
+  local name=${1##*/} t last="" prev="" review="" work="" final="" IFS='-_'
+  local -a toks=()
+  name=${name,,}
+  read -ra toks <<< "$name" || true
+  for t in "${toks[@]}"; do
+    [[ -n $t ]] || continue
+    [[ $t == council* ]] && return 0
+    [[ $t =~ ^(x?review|rev|orev|recheck)[0-9]*[a-z]?$ ]] && review=1
+    [[ $t =~ ^(fix|impl|work|build)[a-z0-9]*$ ]] && work=1
+    [[ $t =~ ^final[0-9]*$ ]] && final=1
+    prev=$last last=$t
+  done
+  if [[ -n $review ]]; then echo review; return 0; fi
+  if [[ -n $work ]]; then echo work; return 0; fi
+  [[ $last =~ ^r[0-9]+[a-z]?$ ]] && last=$prev
+  if [[ -n $final || $last =~ ^(terra|sol|codex)[0-9]*[a-z]?$ ]]; then echo review; fi
+  return 0
+}
+review_launch() {
+  local text role
+  role=$(name_role "${JOB:-}")
+  [[ $role == review ]] && return 0
+  [[ $role == work ]] && return 1
+  text=$(head -c 4096 -- "$prompt_src") text=${text#"${text%%[![:space:]]*}"}
+  [[ $text == "REVIEW ONLY."* || $text == "RECHECK ONLY."* || $text == "FINAL REVIEW ONLY."* ]]
+}
+launch_effort() {  # $1: the model's own default; EFFORT, when set, is already in it
+  if [[ -z ${EFFORT:-} && $1 =~ ^(minimal|low|medium)$ ]] && review_launch; then echo high; else echo "$1"; fi
+}
+effort=$(launch_effort "$effort")
 label=$model fallback_from=""
 
 jobs_root=${AGENT_JOBS_DIR:-$HOME/.local/state/agent-jobs}

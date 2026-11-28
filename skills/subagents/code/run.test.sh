@@ -264,5 +264,38 @@ kill9_case() {  # $1 model label, $2 harness sleep var, $3 label
 kill9_case haiku CLAUDE_SLEEP claude
 STARTED=codex.started kill9_case sol62 CODEX_SLEEP codex
 
+# A review runs at least high on every model unless EFFORT says otherwise: a REVIEW ONLY. /
+# RECHECK ONLY. brief or a review JOB name makes Fable high; ordinary Fable work stays medium.
+setup
+effort_arg() { grep -xA1 -- --effort "$HOME_/claude.args" | tail -n1; }
+launch_as fable plain
+check "review effort: ordinary Fable work medium" test "$(effort_arg)" = medium
+for j in p9-S1-review p9-s2-recheck1 p9-final-sol p9-final2; do
+  launch_as fable "$j"
+  check "review effort: JOB $j runs Fable high" test "$(effort_arg)" = high
+done
+printf '\n  REVIEW ONLY. Read the diff.\n' >"$HOME_/review-brief.md"
+BRIEF=$HOME_/review-brief.md launch_as fable rbrief
+check "review effort: a REVIEW ONLY. brief runs Fable high" test "$(effort_arg)" = high
+printf 'RECHECK ONLY. F1 again.\n' >"$HOME_/recheck-brief.md"
+BRIEF=$HOME_/recheck-brief.md launch_as fable rcbrief
+check "review effort: a RECHECK ONLY. brief runs Fable high" test "$(effort_arg)" = high
+BRIEF=$HOME_/recheck-brief.md launch_as fable rcbrief-eff EFFORT=medium
+check "review effort: EFFORT wins over the review default" test "$(effort_arg)" = medium
+launch_as fable p9-finalize-impl
+check "review effort: a finalize JOB is not a review" test "$(effort_arg)" = medium
+# One role rule with t3-thread.mjs: a fix/impl name is never a review (a -final-fix worker included,
+# whatever its brief); a review/recheck token or a reviewer at the end is.
+for j in p9-final-fix-r2 p9-s1-impl-r2 p9-s1-opus-r2 p9-s1-council-sol; do
+  launch_as fable "$j"
+  check "review effort: JOB $j is ordinary work at medium" test "$(effort_arg)" = medium
+done
+BRIEF=$HOME_/recheck-brief.md launch_as fable p9-final-fix-r3
+check "review effort: a fix JOB with a RECHECK ONLY. brief stays medium" test "$(effort_arg)" = medium
+for j in p9-s2-fix-review p9-s1-terra-r2 p9-s1-codex; do
+  launch_as fable "$j"
+  check "review effort: JOB $j runs Fable high" test "$(effort_arg)" = high
+done
+
 echo "$((n - fails))/$n passed"
 [[ $fails -eq 0 ]]

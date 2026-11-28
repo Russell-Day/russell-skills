@@ -167,7 +167,7 @@ function selection(label) {
     instanceId: codexInstanceFor(id),
     model: id,
     options: [
-      { id: "reasoningEffort", value: effort ?? e },
+      { id: "reasoningEffort", value: launchEffort(e) },
       { id: "serviceTier", value: "default" },
     ],
   });
@@ -175,7 +175,7 @@ function selection(label) {
     // Same Claude account as orchestrators, with a 200K auto-compact window.
     instanceId: claudeAccount.t3WorkerInstance,
     model: id,
-    options: [{ id: "effort", value: effort ?? defaultEffort }, ...extra, { id: "contextWindow", value: "200k" }],
+    options: [{ id: "effort", value: launchEffort(defaultEffort) }, ...extra, { id: "contextWindow", value: "200k" }],
   });
   switch (label) {
     case "sol": return codex("gpt-6-sol", "medium");
@@ -183,7 +183,7 @@ function selection(label) {
     case "terra61": return codex("gpt-6.1-terra", "high"); // every stage review; finals are sol62 alone
     case "luna": return codex("gpt-6-luna", "xhigh");
     case "astra": return codex("gpt-6-astra", "low"); // EFFORT=medium for final checks
-    case "fable": return claude("claude-fable-5-2", [], "medium"); // medium by default; EFFORT= overrides
+    case "fable": return claude("claude-fable-5-2", [], "medium"); // medium by default, high for a review; EFFORT= overrides
     case "opus": return claude("claude-opus-5-5", [{ id: "fastMode", value: false }]);
     case "sonnet": return claude("claude-sonnet-5-5", [], "high");
     case "haiku": return claude("claude-haiku-5-5", [], "high");
@@ -200,11 +200,43 @@ function parseDuration(s) {
   return Number(m[1]) * { "": 60, s: 1, m: 60, h: 3600 }[m[2]] * 1000;
 }
 
+const JOBS_ROOT = path.resolve(process.env.AGENT_JOBS_DIR ?? path.join(home, ".local/state/agent-jobs"));
+const job = path.join(JOBS_ROOT,
+  process.env.JOB ?? `${new Date().toISOString().replace(/[-:]/g, "").slice(0, 15)}-${model}-t3`);
+{ const bad = jobDirProblem(job); if (bad) { console.error(`job dir ${JSON.stringify(job)} ${bad}: hand-offs read its files only there (pick a JOB that is one plain name)`); process.exit(2); } }
+// One role rule for effort and the final budget (the same rule a usage collector should read). A JOB
+// name is a review's when a token is review/recheck (`-review`, `-recheck1`, `-fix-review`), or, with
+// no fix/impl/work/build token, a final (`-final`, `-final2`, `-final-sol-r2`) or it ends in a
+// reviewer (`-terra`, `-sol`, `-codex`, an `-rN` after). A fix or impl name (`-final-fix-r2`,
+// `-impl-r1`) is never a review: not lifted to review effort, not counted against the final budget.
+// A council name says neither.
+const REVIEW_WORD = /^(x?review|rev|orev|recheck)\d*[a-z]?$/;
+const WORK_WORD = /^(fix|impl|work|build)\w*$/;
+function nameRole(name) {
+  const toks = String(name).toLowerCase().split(/[-_]/).filter(Boolean);
+  if (toks.some((t) => t.startsWith("council"))) return null;
+  if (toks.some((t) => REVIEW_WORD.test(t))) return "review";
+  if (toks.some((t) => WORK_WORD.test(t))) return "work";
+  const last = /^r\d+[a-z]?$/.test(toks.at(-1) ?? "") ? toks.at(-2) : toks.at(-1);
+  return toks.some((t) => /^final\d*$/.test(t)) || /^(terra|sol|codex)\d*[a-z]?$/.test(last ?? "") ? "review" : null;
+}
+const jobRole = nameRole(path.basename(job));
+// A review job is one by that name, or (a name that says neither) by its brief ("REVIEW ONLY." /
+// "RECHECK ONLY.") or an earlier counted round, so a free-form recheck on the same JOB counts too.
+const reviewJob = (brief) => jobRole === "review" || (jobRole !== "work" && (/^\s*(FINAL )?(REVIEW|RECHECK) ONLY\./.test(brief)
+  || fs.existsSync(path.join(job, "rounds")) || fs.existsSync(path.join(job, "rounds_failed"))));
+// A review runs at least high on every model unless EFFORT says otherwise: Fable's own medium (and
+// any default below high) is for ordinary work. Every selection() goes through this; roleEffort does
+// the same to a continued or handed-off thread's saved selection.
+const reviewLaunch = reviewJob(fs.readFileSync(promptSrc, "utf8"));
+const BELOW_HIGH = ["minimal", "low", "medium"];
+const launchEffort = (dflt) => process.env.EFFORT ?? (reviewLaunch && BELOW_HIGH.includes(dflt) ? "high" : dflt);
+const roleEffort = (sel) => !sel || process.env.EFFORT || !reviewLaunch ? sel
+  : { ...sel, options: sel.options?.map((o) => (o.id === "effort" || o.id === "reasoningEffort") && BELOW_HIGH.includes(o.value) ? { ...o, value: "high" } : o) };
 // A pick that can't start (a pinned account signed out) says why and stops, with no stack trace.
 let modelSelection;
 try { modelSelection = selection(model); } catch (e) { console.error(e.message); process.exit(1); }
 const timeoutMs = parseDuration(process.env.TIMEOUT ?? "45m");
-const JOBS_ROOT = path.resolve(process.env.AGENT_JOBS_DIR ?? path.join(home, ".local/state/agent-jobs"));
 // Plan 1154 (chk_7008c508015f4050): every T3 call opens its own connect, and the connect budget
 // (`t3 auth session issue` start-up, the ticket, the socket) is T3_API_TIMEOUT_MS, 30 s by default
 // so the timers don't pile up. Under load (load avg 32) the token CLI alone took over 30 s twice and
@@ -213,25 +245,18 @@ const JOBS_ROOT = path.resolve(process.env.AGENT_JOBS_DIR ?? path.join(home, ".l
 // the modes above (--orchestrator, --attach, --rename) run under callers' deadlines and the pacer's
 // planning lock, which are sized for 30 s connects (plan 1154 S1 review F1). A caller's positive value wins.
 if (!(Number(process.env.T3_API_TIMEOUT_MS) > 0)) process.env.T3_API_TIMEOUT_MS = "120000";
-const job = path.join(JOBS_ROOT,
-  process.env.JOB ?? `${new Date().toISOString().replace(/[-:]/g, "").slice(0, 15)}-${model}-t3`);
-{ const bad = jobDirProblem(job); if (bad) { console.error(`job dir ${JSON.stringify(job)} ${bad}: hand-offs read its files only there (pick a JOB that is one plain name)`); process.exit(2); } }
 fs.mkdirSync(job, { recursive: true });
 fs.copyFileSync(promptSrc, path.join(job, "prompt.md"));
 fs.appendFileSync(path.join(job, "prompt.md"), "\n\n" + fs.readFileSync(path.join(here, "worker-communication.md"), "utf8"));
 const prompt = fs.readFileSync(path.join(job, "prompt.md"), "utf8");
 const log = (...a) => fs.appendFileSync(path.join(job, "run.log"), `${new Date().toISOString()} ${a.join(" ")}\n`);
 log(`timeout ${timeoutMs / 60000} min (TIMEOUT=${process.env.TIMEOUT ?? "unset"})`);
-// Review budget (orchestrate §9): every launch of a review job that sends a turn is a round,
-// counted in the job dir's `rounds`. A review job is one by its brief ("REVIEW ONLY." /
-// "RECHECK ONLY."), its JOB name (`-review`, `-recheck`, `-final`) or an earlier counted round,
-// so a free-form recheck on the same JOB counts too. Past REVIEW_ROUNDS (default 3; 5 for an
+// Review budget (orchestrate §9): every launch of a review job (reviewJob above) that sends a turn
+// is a round, counted in the job dir's `rounds`. Past REVIEW_ROUNDS (default 3; 5 for an
 // evidenced security / data-loss / concurrency blocker) nothing is sent and the run exits 3.
 // Opus pre-reviews loop until APPROVE: counted, never capped. A re-poll (ATTACH without
 // CONTINUE) sends nothing, so it is gated only before a limit fallback's send.
-const REVIEW_JOB_RE = /(^|-)(review|recheck|final)(?=-|\d|$)/i;
-const isReview = /^\s*(REVIEW|RECHECK) ONLY\./.test(prompt) || REVIEW_JOB_RE.test(path.basename(job))
-  || fs.existsSync(path.join(job, "rounds")) || fs.existsSync(path.join(job, "rounds_failed"));
+const isReview = reviewJob(prompt);
 const capped = model !== "opus";
 const maxRounds = Number(process.env.REVIEW_ROUNDS ?? 3);
 if (isReview && !Number.isFinite(maxRounds)) { console.error(`REVIEW_ROUNDS=${process.env.REVIEW_ROUNDS} is not a number`); process.exit(2); }
@@ -244,23 +269,23 @@ const PROVIDER_FAILS_MAX = 3;
 // A plan's final review rounds share one count: every `<key>-final…` JOB in the
 // jobs dir (`<key>-final-sol`, `<key>-final2`, …) adds its `rounds`, so a fresh final JOB doesn't
 // restart the budget. A final run that ends with no verdict and no findings isn't a round (its
-// round goes back, a `rounds_empty` line instead; these and provider errors stop at PROVIDER_FAILS_MAX).
+// round goes back, a `rounds_empty` line instead) and isn't a provider error either.
 const FINAL_JOB_RE = /^(.+?)-final(?=-|\d|$)/i;
-const finalKey = FINAL_JOB_RE.exec(path.basename(job))?.[1]?.toLowerCase() ?? null;
+// Only a review's final counts: a `-final-fix-r2` worker is neither gated nor counted.
+const finalKey = jobRole === "work" ? null : FINAL_JOB_RE.exec(path.basename(job))?.[1]?.toLowerCase() ?? null;
 function otherFinalRounds() {
   if (!finalKey) return 0;
   let names = [];
   try { names = fs.readdirSync(path.dirname(job)); } catch { return 0; }
-  return names.filter((n) => n !== path.basename(job) && FINAL_JOB_RE.exec(n)?.[1]?.toLowerCase() === finalKey)
+  return names.filter((n) => n !== path.basename(job) && nameRole(n) !== "work" && FINAL_JOB_RE.exec(n)?.[1]?.toLowerCase() === finalKey)
     .reduce((sum, n) => { try { return sum + (Number.parseInt(fs.readFileSync(path.join(path.dirname(job), n, "rounds"), "utf8"), 10) || 0); } catch { return sum; } }, 0);
 }
-const emptyTurns = () => { try { return fs.readFileSync(path.join(job, "rounds_empty"), "utf8").split("\n").filter((l) => l.trim()).length; } catch { return 0; } };
 function budgetGate() {
   if (!isReview || roundCounted) return;
   // Provider-error turns aren't rounds (plan 1120 S3b), so a refusal loop could send forever: 3 stop it, on any model.
-  const empty = emptyTurns(), failed = failedTurns() + empty;
+  const failed = failedTurns();
   if (failed >= PROVIDER_FAILS_MAX) {
-    const line = `${failed} provider-error${empty ? " or empty final" : ""} turns on ${path.basename(job)}: start a fresh review (new JOB) or another model, or write closed.md`;
+    const line = `${failed} provider-error turns on ${path.basename(job)}: start a fresh review (new JOB) or another model, or write closed.md`;
     log(line);
     console.error(line);
     fs.writeFileSync(path.join(job, "exit_code"), "3\n");
@@ -269,7 +294,7 @@ function budgetGate() {
   if (!capped) return;
   const round = nextRound() + otherFinalRounds();
   if (round <= maxRounds) return;
-  const line = finalKey ? `final review budget: round ${round} > ${maxRounds} for ${finalKey} (its -final JOBs share one count); nothing sent. In this order: a blocker past the gate goes to the user: stop and ask the user, never file it away. Then fix accepted small findings in files the plan touches; park the remaining optional findings and nits; file the remaining defects as follow-up items. REVIEW_ROUNDS=5 only for an evidenced security, data-loss or concurrency blocker.`
+  const line = finalKey ? `final review budget: round ${round} > ${maxRounds} for ${finalKey} (its -final JOBs share one count); nothing sent. In this order: Stop and ask the user about blockers. Then fix accepted small findings in files the plan touches; park the remaining optional findings and nits; file the remaining defects as follow-up items. REVIEW_ROUNDS=5 only for an evidenced security, data-loss or concurrency blocker.`
     : `review budget: round ${round} > ${maxRounds} for ${path.basename(job)}; nothing sent. Fix what you agree with, then commit with every open id disputed (with evidence), stop and ask the user, or write closed.md (orchestrate §9). REVIEW_ROUNDS=5 only for an evidenced security, data-loss or concurrency blocker.`;
   log(line);
   console.error(line);
@@ -833,7 +858,7 @@ async function runThread(attempt) {
       const head = msgs ? `${opening}${EARLIER}${msgFile}` : null;
       if (head) writeLauncherFile(msgFile, msgs.body, { head: headSha(head), deps: msgs.deps });
       handoff = { from: attach, n, title, text: head ? `${head}\n\n## This round\n\n${round}` : `${opening}${prompt}` };
-      if (snap.modelSelection && !process.env.EFFORT) adopt(current(snap.modelSelection));
+      if (snap.modelSelection && !process.env.EFFORT) adopt(roleEffort(current(snap.modelSelection)));
       if (modelSelection.instanceId === claudeAccount.t3Instance) modelSelection = { ...modelSelection, instanceId: claudeAccount.t3WorkerInstance };
       attach = undefined;
       snap = undefined;
@@ -846,7 +871,7 @@ async function runThread(attempt) {
   if (snap) {
     priorRunId = snap.latestRunId;
     // Keep the thread's own model and effort unless EFFORT overrides it.
-    if (snap.modelSelection && !process.env.EFFORT) modelSelection = current(snap.modelSelection);
+    if (snap.modelSelection && !process.env.EFFORT) modelSelection = roleEffort(current(snap.modelSelection));
     // Older workers used the orchestrator profile; move them on continuation
     // while retaining their exact model and options. T3 preserves the resume cursor.
     if (modelSelection.instanceId === claudeAccount.t3Instance) {
