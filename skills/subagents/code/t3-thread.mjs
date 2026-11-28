@@ -67,7 +67,7 @@ import { codexLoginRe, loginHint, loginOk as codexLoginOk, markSignedOut, signed
 import { agyOutUntil, noticeOnce, recordQuotaError } from "./agy-state.mjs";
 import { abandonThread, compactionCount as compactions, createMainThread, createThread, currentThread, getThread, interruptThread, orchModelSelection, orchestratorArgs, projectFor, renameThread, runReplies, sendMessage, settleThread, t3Query, workerThreadTitle } from "./t3-api.mjs";
 
-// The launcher's own nudges (see awaitAnswer), exact text: a hand-off's messages file leaves them out
+// The launcher's own nudges (see awaitAnswer), exact text: a hand-off's messages file leaves them out.
 // `--nudges` prints them as JSON (the tests read them from here instead of retyping them).
 const VERDICT_NUDGE = "Your last turn ended without a verdict. Finish the review now: read the results of anything you started (or run the checks yourself in the foreground), then send the full packet ending in \"VERDICT: APPROVE\" or \"VERDICT: REVISE\". Don't end the turn waiting.";
 const workerNudge = (verdict) => "Your last turn ended on waiting, so whatever you were waiting for can't reach your lead. Check it now: read its output, or wait for it inside this turn (t3_background_wait on its task, or run it in the foreground with a fitting timeout), then send your full report"
@@ -508,7 +508,7 @@ const REVIEWERS = ["sol62", "sol61", "terra61", "astra"];
 // briefs from older launchers (kept as they are in the messages file).
 const TASK_OPEN = "<<<ORIGINAL TASK", TASK_CLOSE = "ORIGINAL TASK>>>";
 const wrapTask = (text) => `${TASK_OPEN}\n${text.trim()}\n${TASK_CLOSE}`;
-// The outermost task blocks in text from offset `from` (a line start) on, matched with nesting
+// The outermost task blocks in text from offset `from` (a line start) on, matched with nesting:
 // only whole lines equal to a marker count, and a block ends where the depth
 // returns to 0, so a task that quotes an earlier brief (its blocks and EARLIER line too) stays whole.
 // Each block is { open, close, end }: where its open line starts, where its close line starts and the
@@ -629,7 +629,8 @@ const EDITS_SRC = String.raw`Its edits are uncommitted in the tree: read \`git s
 const LAYOUT_RES = [
   new RegExp(String.raw`^You take over from thread \S+; its last report is \S+\.(?: Earlier rounds of \S+: report\.r\d+\.md(?:, report\.r\d+\.md)* beside it \(report\.md is the latest round; read them together, a fix round's reply may not repeat the first packet\)\.)?(?:\nPLAN: \S+)?\n\n${EDITS_SRC}${STATE_SRC}\n\n${PENDING_SRC} Then do this round\.\n\nIts original task, for owned files, rules and Verify commands:\n\n$`),
 ];
-// Older briefs still (the task between the markers, no EARLIER line): their task is taken out only from that launcher's whole layout, sentence by sentence.
+// Older briefs still, with the task between the markers but no EARLIER line: their task is taken
+// out only from that launcher's whole layout, sentence by sentence.
 const PRE_STATE_SRC = String.raw` (?:Its last turn completed with \`VERDICT: DONE\`: don't redo the stage or that round; do the round at the end\.|If that report ends with \`HANDOFF:\`, (?:is empty or names work still open, finish that first; otherwise don't redo the stage: do the round below|it stopped mid-task: finish what it lists as left)\.|Its last turn (?:ended without \`VERDICT: DONE\`|did not finish \([\w-]+\)): its work is not finished \(its report may be from an earlier round; one ending \`HANDOFF:\` lists what is left\)\. Compare the diff with the original task and its last round, finish what is missing, then do the round at the end, if any\.)`;
 const PRE_LAYOUT_RES = [
   new RegExp(String.raw`^You take over from thread \S+; its last report is \S+\.(?: Earlier rounds of \S+: report\.r\d+\.md(?:, report\.r\d+\.md)* beside it \(report\.md is the latest round; read them together, a fix round's reply may not repeat the first packet\)\.)?(?:\nPLAN: \S+)?\n\n${EDITS_SRC}${PRE_STATE_SRC}\n\nIts original task, for owned files, rules and Verify commands:\n\n$`),
@@ -642,7 +643,7 @@ const PRE_LAYOUT_RES = [
 // right after the first outer task block (matched with nesting). Returns that delegate line (kept in
 // the entry), the task, the EARLIER file and what follows that line (the round, or the lead's
 // findings). Anything else, a takeover note of the lead's own with its instructions included, is the
-// lead's text, kept whole. A brief from before S3 (PRE_LAYOUT_RES) gives its task only (earlier null:
+// lead's text, kept whole. An older brief without an EARLIER line (PRE_LAYOUT_RES) gives its task only (earlier null:
 // entryText's old format).
 const TAKEOVER_RE = /(?:^|\n)[ \t]*You take over from (?:worker )?thread \S+/;
 const DELEGATE_LINE_RE = /^Act as the [\w -]+ sub-agent for this task\.$/;
@@ -745,7 +746,7 @@ function entryText(text, task, first, chain) {
     return `${before ? `${before}\n\n` : ""}(a hand-off brief) Earlier lead messages: ${brief.earlier}. Its PENDING messages were handed on with this brief: they are still pending unless this message's turn ended \`VERDICT: DONE\`.`
       + (after ? `\n\nGiven with it:\n\n${after === task ? `(the original brief again: ${IN_BRIEF})` : after}` : "");
   }
-  // A brief from before S3 (its LAST ROUND block kept): only an outer task block (matched with nesting,
+  // An older brief without an EARLIER line (its LAST ROUND block kept): only an outer task block (matched with nesting,
   // r2) that holds this task is taken out; a message quoting another block keeps it, and unbalanced
   // markers keep the whole text.
   const b = task ? (taskBlocks(full) ?? []).find((x) => blockTask(full, x).trim() === task) : null;

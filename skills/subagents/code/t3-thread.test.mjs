@@ -1173,7 +1173,7 @@ test("handoff messages: a lead's own words before a generated brief: the message
   assert.equal(third.text.split("<<<ORIGINAL TASK").length, 3, `the lead's message once, with the brief it holds:\n${third.text}`);
 });
 
-test("handoff messages: a brief from before S3 whose task quotes a block: the task whole, only its outer block replaced; unbalanced markers kept whole (r2 F1)", () => {
+test("handoff messages: an older brief (no EARLIER line) whose task quotes a block: the task whole, only its outer block replaced; unbalanced markers kept whole (r2 F1)", () => {
   const task = "Do S3: own c.py. The S1 brief, for reference:\n\n<<<ORIGINAL TASK\nImplement S1: own b.py.\nORIGINAL TASK>>>\n\nVerify: pytest c.";
   const old = `You take over from thread abc; its last report is /x/report.md.\n\nIts edits are uncommitted in the tree: read \`git status\` and \`git diff\` for its files first and keep what it finished. If that report ends with \`HANDOFF:\`, it stopped mid-task: finish what it lists as left.\n\nIts original task, for owned files, rules and Verify commands:\n\n${wrapped(task)}\n\nLAST ROUND\n\nfix the header`;
   const unbalanced = `Again, as sent:\n\n${wrapped(task)}\nORIGINAL TASK>>>\n\nthen fix G.`;
