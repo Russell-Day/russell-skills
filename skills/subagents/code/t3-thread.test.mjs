@@ -648,7 +648,7 @@ function handoffHome(rows, items = []) {
   };
 }
 
-// A completed turn without VERDICT: DONE: the successor is told (final r3 F1); the messages file says per message what is left (plan 1120 S3).
+// A completed turn without VERDICT: DONE: the successor is told; the messages file says per message what is left.
 const UNFINISHED = "Its edits are uncommitted in the tree: read `git status` and `git diff` for its files first and keep what it finished. Its last turn ended without `VERDICT: DONE`: its work is not finished (its report may be from an earlier round; one ending `HANDOFF:` lists what is left).\n\n";
 const pendingOne = (file) => `Every message its lead sent it is in ${file}, oldest first, each headed with how its turn ended. Do every message marked PENDING there, in order (message 1 of 1: those after its last \`VERDICT: DONE\` turn); compare the diff with each first and keep what is already done. Then do this round.\n\n`;
 test("handoff: CONTINUE after 3 compactions opens a fresh thread told the old one, its report and PLAN", () => {
@@ -714,7 +714,7 @@ test("handoff: a worker's fix round at 2 compactions goes to a fresh thread; no 
   assert.ok(f.read("run.log").includes("(2 compactions)"));
 });
 
-// Plan 1120 S3: a worker's successor gets every lead message of the old thread in
+// A worker's successor gets every lead message of the old thread in
 // <job>/handoff-<k>-messages.md, each headed with the turn that answered it and how that turn ended,
 // the original task once in its brief, and a pointer line for a later hand-off. The launcher's own
 // nudges are left out by the exact texts it prints with --nudges (read here, not retyped).
@@ -726,7 +726,7 @@ const IN_BRIEF = "inlined in the hand-off brief between the ORIGINAL TASK marker
 const S2_TASK = "Implement S2: own a.py. Verify: pytest a.";
 // The old thread's turns, oldest first: { lead, reply, status = "completed", id, runless } is a user
 // message (none without `lead`) and its run; `runless` adds the message with no run (queued, never started).
-// Plan 1154 S1 (chk_7008c508015f4050). A hook appended to a home's preload (it runs after fake-t3.mjs):
+// Worker launches under a slow T3. A hook appended to a home's preload (it runs after fake-t3.mjs):
 // MINT_LOG gets "<T3_API_TIMEOUT_MS> <the token CLI's timeout>" per connect; FAKE_CREATE_FAIL=refused
 // fails thread.create without T3 taking it, =landed lets T3 take it and the caller see a failure.
 const createFault = `
@@ -756,7 +756,7 @@ const recordFiles = (dir) => Object.fromEntries(["thread_id", "threads", "thread
   try { return [n, fs.readFileSync(path.join(dir, n), "utf8")]; } catch { return [n, null]; }
 }));
 
-test("plan 1154: a worker launch's T3 connects get 120 s unless the caller set T3_API_TIMEOUT_MS; --rename keeps 30 s", () => {
+test("a worker launch's T3 connects get 120 s unless the caller set T3_API_TIMEOUT_MS; --rename keeps 30 s", () => {
   const saved = process.env.T3_API_TIMEOUT_MS;
   delete process.env.T3_API_TIMEOUT_MS;
   try {
@@ -787,7 +787,7 @@ test("plan 1154: a worker launch's T3 connects get 120 s unless the caller set T
   } finally { if (saved !== undefined) process.env.T3_API_TIMEOUT_MS = saved; }
 });
 
-test("plan 1154: a create T3 never took leaves a fresh job dir with no thread record; exit nonzero, run.log says so", () => {
+test("a create T3 never took leaves a fresh job dir with no thread record; exit nonzero, run.log says so", () => {
   const f = agyHome();
   fs.appendFileSync(path.join(f.home, "agy-preload.mjs"), createFault);
   const r = f.run("cf1", { FAKE_CREATE_FAIL: "refused" });
@@ -798,7 +798,7 @@ test("plan 1154: a create T3 never took leaves a fresh job dir with no thread re
   assert.match(f.read("cf1", "run.log"), /create failed; [0-9a-f-]{36} never existed, job dir restored: .*T3 slow: connect \(token\)/);
 });
 
-test("plan 1154: a hand-off whose new thread T3 never made keeps the job's old record byte for byte", () => {
+test("a hand-off whose new thread T3 never made keeps the job's old record byte for byte", () => {
   const f = handoffHome(threeCompactions);
   setTurns(f, [{ lead: "Implement S2: own a.py.", reply: `reply on ${longThread}` }]);
   fs.appendFileSync(f.preload, createFault);
@@ -813,7 +813,7 @@ test("plan 1154: a hand-off whose new thread T3 never made keeps the job's old r
   assert.ok(id && id !== longThread, f.read("run.log"));
 });
 
-test("plan 1154: a refused create doesn't undo another launch's record of the same JOB", () => {
+test("a refused create doesn't undo another launch's record of the same JOB", () => {
   const f = agyHome();
   fs.appendFileSync(path.join(f.home, "agy-preload.mjs"), createFault);
   // The other launch records its thread while this one's create is failing (outermost hook, so it runs first).
@@ -839,7 +839,7 @@ test("plan 1154: a refused create doesn't undo another launch's record of the sa
   assert.match(f.read("cf3", "run.log"), /never existed, but another launch changed the job dir since, so it is kept/);
 });
 
-test("plan 1154: a create that landed though the caller saw a failure keeps the record", () => {
+test("a create that landed though the caller saw a failure keeps the record", () => {
   const f = agyHome();
   fs.appendFileSync(path.join(f.home, "agy-preload.mjs"), createFault);
   const r = f.run("cf2", { FAKE_CREATE_FAIL: "landed" });
@@ -1003,7 +1003,7 @@ test("handoff messages: an old-format successor brief (ORIGINAL TASK + LAST ROUN
   assert.equal(body.split(S2_TASK).length, 1, "the task isn't in the file");
 });
 
-// Plan 1120 S3 r1 F1: a generated hand-off brief is known by its whole layout (TAKEOVER line, the task
+// A generated hand-off brief is known by its whole layout (TAKEOVER line, the task
 // between the markers, the EARLIER line right after them), never by one line. A lead message that
 // only holds such a line, or quotes another task block, keeps all its text.
 test("handoff messages: a lead message that only holds an EARLIER LEAD MESSAGES line keeps all its text (r1 F1 review probe)", () => {
@@ -1075,7 +1075,7 @@ test("handoff messages: a successor brief behind T3's delegate_task line is stil
   assert.ok(!g.read("handoff-2-messages.md").includes("You take over from"), "no nesting");
 });
 
-// Plan 1120 S3 r2 F1: the outer task block is matched with nesting (only whole marker lines count; it
+// The outer task block is matched with nesting (only whole marker lines count; it
 // ends where the depth returns to 0) and the EARLIER line counts only right after it. A task, round or
 // findings that quote an earlier generated brief stay whole at every hop; unbalanced markers, or a
 // lead's own words before the takeover line, mean the message is not a generated brief: kept whole.
@@ -1187,7 +1187,7 @@ test("handoff messages: a brief from before S3 whose task quotes a block: the ta
     + "\n" + entry(2, 2, NO_VERDICT, true, unbalanced)), body);
 });
 
-// Plan 1120 S3 final F1: a hand-off reads an EARLIER file a lead message names only when this
+// A hand-off reads an EARLIER file a lead message names only when this
 // launcher wrote it for this job chain (a job dir under the jobs root that is the job or records the
 // thread, the exact file name, realpath checked). Anything else stays literal text.
 // final F4: such a file that is missing, swapped, unreadable or no longer the brief stops the hand-off
@@ -1358,7 +1358,7 @@ test("final F5 probe: a notification run after a DONE turn keeps that message do
   assert.ok(h.read("handoff-2-messages.md").endsWith(entry(1, 1, "completed with VERDICT: DONE (then turn 2: did not finish (failed))", false, `(the original task: ${IN_BRIEF})`)), h.read("handoff-2-messages.md"));
 });
 
-// Plan 1120 final r2: the launcher records every hand-off messages file it writes in the job's
+// The launcher records every hand-off messages file it writes in the job's
 // launcher-files.jsonl (whole-file sha256, its brief's head, the files it depends on). A messages file
 // a lead message names is trusted only when listed; listed but missing or changed stops the hand-off;
 // unlisted is literal text, never read and never a stop.
@@ -1435,7 +1435,7 @@ test("final r2: a job from before the manifest: its brief known by its head file
 });
 
 
-// Plan 1120 final r3 F4: every job dir the launcher writes to is read back the same way, and a manifest
+// Every job dir the launcher writes to is read back the same way, and a manifest
 // that can't be read or written stops the hand-off before anything is settled.
 function stoppedIn(f, r, why) {
   assert.equal(r.status, 1, r.stderr);
@@ -1496,7 +1496,7 @@ test("final r5 F4: a relative AGENT_JOBS_DIR is resolved, so its recorded files 
   rehop(f, [{ lead: brief, reply: "partial" }], "fix C");
   stoppedIn(f, f.run(env), `${file} is missing or not a regular file`);
 });
-// Plan 1120 S3 r1 F2: without the old thread's lead messages a hand-off would start a successor with
+// Without the old thread's lead messages a hand-off would start a successor with
 // only the new round. A failed read, none, or an empty first one: nothing saved, settled, written or
 // started; exit 1 (exit_code 1), as a refused settle.
 const failMessagesRead = `\nimport child from 'node:child_process'; import {syncBuiltinESMExports} from 'node:module';\nconst baseExec=child.execFileSync; child.execFileSync=function(cmd,args,...rest){if(args?.[3]?.includes('select message_id, run_id, created_at, payload_json')) throw new Error('simulated read failure'); return baseExec.call(this,cmd,args,...rest)}; syncBuiltinESMExports();\n`;
@@ -1891,7 +1891,7 @@ test("final review budget: a final run with no verdict and no findings isn't a r
   assert.equal(f.readJob("plan9-final-sol", "rounds"), "2\n");
 });
 
-// Provider-error turns (plan 1120 S3b, chk_335c542350db4fa8): a launch that ends failed with a
+// Provider-error turns: a launch that ends failed with a
 // provider error and no reply gives its round back; 3 such turns stop the job. FAKE_PROVIDER_ERROR
 // fails every new turn (not /compact) with that message; FAKE_PROVIDER_REPLY also stores a reply first.
 const FLAGGED = "This content was flagged for possible cybersecurity risk. If this seems wrong, try rephrasing your request. Our usage policies apply to all requests; repeated flags on one conversation may end it early. Request id req_0123456789abcdef.";

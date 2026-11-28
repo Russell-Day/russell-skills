@@ -261,7 +261,7 @@ test("sendMessage keepBusyProvider: a refused account move goes out once more on
   const sent = [];
   const refuseMei = async (c) => { sent.push(c); if ((c.modelSelection?.instanceId ?? "claudeAgent_mei") === "claudeAgent_mei") throw busy; };
   // No selection given: the thread's own (mei) is refused, so it goes on claude_personal with the same model.
-  const id = await sendMessage("t1", "Restarted tedi now!", { createdBy: "user", keepBusyProvider: true, query }, refuseMei);
+  const id = await sendMessage("t1", "Restarted the server now!", { createdBy: "user", keepBusyProvider: true, query }, refuseMei);
   assert.equal(sent.length, 2);
   assert.deepEqual(sent[1].modelSelection, { ...mei, instanceId: "claude_personal" });
   assert.equal(sent[1].messageId, id);
@@ -478,7 +478,7 @@ test("t3Connect: T3_SESSION_TOKEN skips the CLI and keeps tokenRejected on 401",
   assert.match(r.message, /^T3 token rejected/);
 });
 
-test("orchModelSelection / asOrchSelection: agent-started leads go to the orchestrator instance, Russell's own stay (plan 1008 S2)", () => {
+test("orchModelSelection / asOrchSelection: agent-started leads go to the orchestrator instance, the user's own stay", () => {
   const acct = { t3Instance: "mei", t3OrchInstance: "mei_orch", second: { t3Instance: "ultra", t3OrchInstance: "ultra_orch" } };
   const main = mainModelSelection("opus", "high");
   assert.deepEqual(orchModelSelection("opus", "high", acct), { ...main, instanceId: "mei_orch" });
@@ -486,7 +486,7 @@ test("orchModelSelection / asOrchSelection: agent-started leads go to the orches
   const on = (instanceId) => ({ instanceId, model: "claude-opus-5-5" });
   assert.deepEqual(asOrchSelection(on("mei"), "orchestrator", acct), on("mei_orch"));
   assert.deepEqual(asOrchSelection(on("ultra"), "triage", acct), on("ultra_orch"), "the second account maps to its own orch");
-  assert.deepEqual(asOrchSelection(on("mei"), "own", acct), on("mei"), "Russell's own thread never moves to _orch");
+  assert.deepEqual(asOrchSelection(on("mei"), "own", acct), on("mei"), "the user's own thread never moves to _orch");
   for (const i of ["mei_orch", "mei_workers", "codex"]) assert.deepEqual(asOrchSelection(on(i), "orchestrator", acct), on(i));
   assert.equal(asOrchSelection(undefined, "orchestrator", acct), undefined);
   assert.deepEqual(asOrchSelection(on("mei"), "orchestrator", { t3Instance: "mei" }), on("mei"), "no orch configured: unchanged");

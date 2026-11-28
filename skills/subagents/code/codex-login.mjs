@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Codex sign-out marks (plan 1154 S2, chk_518de3d554ef45ac). A Codex account whose login expired
+// Codex sign-out marks. A Codex account whose login expired
 // ("refresh token has expired") fails every turn at once; the launcher marks it here and the
 // picker (usage.mjs --pick-codex) skips it until you sign it in again. This copy sends no text
 // (a project copy may add one); the launcher logs each sign-out in run.log and limits.log.
@@ -21,7 +21,7 @@ import { fileURLToPath } from "node:url";
 // The provider's own error text for a dead login, never a usage limit or a network error. Match
 // only thread.lastError (a reply can quote anything).
 // Only the provider's own sentences: a bare "not logged in" or "could not be refreshed" is also
-// what an MCP server or a network error can say (plan 1154 S2 review F4).
+// what an MCP server or a network error can say.
 export const codexLoginRe = /refresh token (has )?expired|(access token|authentication session) could not be refreshed|log out and sign in again/i;
 
 const stateDir = () => process.env.CODEX_LOGIN_STATE_DIR ?? path.join(os.homedir(), ".local/state/agent-stats/codex_signed_out");

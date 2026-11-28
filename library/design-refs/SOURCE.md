@@ -14,5 +14,5 @@
 
 Both scripts carry PEP 723 metadata, so `uv run scripts/shoot.py ...` pulls
 Playwright on the fly; plain `python3` works where Playwright is installed.
-No network calls besides loading the pages you name. `design_refs_search` is a
-tool of the TEDI MCP server; the skill works without it.
+No network calls besides loading the pages you name. `design_refs_search` is an
+optional MCP tool; the skill works without it.

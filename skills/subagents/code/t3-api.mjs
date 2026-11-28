@@ -24,7 +24,7 @@ process.env.PATH = `${process.env.PATH ?? ""}:${path.join(os.homedir(), ".local/
 // --settle does). A timer whose run hangs on a slow T3 would otherwise end after the next
 // tick was due, and systemd starts that tick at once, so the passes pile up behind T3.
 // A worker or reviewer launch raises it for its own run instead: t3-thread.mjs sets 120 s there
-// (plan 1154, a token mint under load average 32 took over 30 s); its main-thread modes keep 30 s.
+// (a token mint under load average 32 took over 30 s); its main-thread modes keep 30 s.
 export const t3Timeouts = () => ({ api: Number(process.env.T3_API_TIMEOUT_MS) || 30000, query: Number(process.env.T3_QUERY_TIMEOUT_MS) || 60000 });
 const slow = (step, ms) => Object.assign(new Error(`T3 slow: ${step} took over ${(ms / 1000).toFixed(1)} s`), { timeout: true });
 function runFor(step, ms, cmd, args, opts) {

@@ -40,4 +40,4 @@ Dated history (dispatches, rounds, hand-offs); Resume keeps only state and the n
 
 ## Sources
 Each doc, thread, meeting or issue the plan relies on: link and the date read.
-For a project with TEDI sources, from `source_sweep(project, topic, people)`.
+When an MCP server offers a source sweep, list what it returns.

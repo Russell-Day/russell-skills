@@ -65,6 +65,6 @@ test("codexLoginRe: the login phrases, not limits, network errors or timeouts", 
     "Your access token could not be refreshed because your refresh token was already used. Please log out and sign in again.",
     "Your authentication session could not be refreshed automatically."]) assert.ok(codexLoginRe.test(t), t);
   for (const t of ["You've hit your usage limit.", "stream disconnected before completion: error sending request", "401 Unauthorized", "Timed out after 600 s",
-    "MCP server tedi: not logged in to Canvas", "gh: You are not logged in to any GitHub hosts",
+    "MCP server notes: not logged in to Canvas", "gh: You are not logged in to any GitHub hosts",
     "the token could not be refreshed: error sending request"]) assert.ok(!codexLoginRe.test(t), t);
 });
